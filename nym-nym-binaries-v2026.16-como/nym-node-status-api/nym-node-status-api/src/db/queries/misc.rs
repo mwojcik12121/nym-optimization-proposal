@@ -1,0 +1,111 @@
+use time::UtcDateTime;
+
+use crate::db::{Storage, models::NetworkSummary};
+
+impl Storage {
+    /// take `last_updated` instead of calculating it so that `summary` matches
+    /// `daily_summary`
+    pub(crate) async fn insert_summaries(
+        &self,
+        summaries: &Vec<(&str, usize)>,
+        summary: &NetworkSummary,
+        last_updated: UtcDateTime,
+    ) -> anyhow::Result<()> {
+        self.insert_summary(summaries, last_updated).await?;
+
+        self.insert_summary_history(summary, last_updated).await?;
+
+        Ok(())
+    }
+
+    async fn insert_summary(
+        &self,
+        summaries: &Vec<(&str, usize)>,
+        last_updated: UtcDateTime,
+    ) -> anyhow::Result<()> {
+        let timestamp = last_updated.unix_timestamp();
+        let mut tx = self.pool.begin().await?;
+
+        for (kind, value) in summaries {
+            let value = value.to_string();
+            sqlx::query!(
+                "INSERT INTO summary
+                    (key, value_json, last_updated_utc)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT(key) DO UPDATE SET
+                    value_json=excluded.value_json,
+                    last_updated_utc=excluded.last_updated_utc;",
+                kind,
+                value,
+                timestamp
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                tracing::error!("Failed to insert data for {kind}: {err}, aborting transaction",);
+                err
+            })?;
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    /// For `<date_N>`, `summary_history` is updated with fresh data on every
+    /// iteration.
+    ///
+    /// After UTC midnight, summary is inserted for `<date_N+1>` and last entry for
+    /// `<date_N>` stays there forever.
+    ///
+    /// This is not aggregate data, it's a set of latest data points
+    async fn insert_summary_history(
+        &self,
+        summary: &NetworkSummary,
+        last_updated: UtcDateTime,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.pool.acquire().await?;
+
+        let value_json = serde_json::to_string(&summary)?;
+        let timestamp = last_updated.unix_timestamp();
+
+        let date = datetime_to_only_date_str(last_updated);
+
+        sqlx::query!(
+            "INSERT INTO summary_history
+                (date, timestamp_utc, value_json)
+                VALUES ($1, $2, $3)
+                ON CONFLICT(date) DO UPDATE SET
+                timestamp_utc=excluded.timestamp_utc,
+                value_json=excluded.value_json;",
+            date,
+            timestamp,
+            value_json
+        )
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(())
+    }
+}
+
+/// YYYY-MM-DD, without time
+fn datetime_to_only_date_str(datetime: UtcDateTime) -> String {
+    datetime.date().to_string()
+}
+
+#[cfg(test)]
+mod test {
+    use time::macros::utc_datetime;
+
+    use super::*;
+
+    #[test]
+    fn date_is_expected_format() {
+        // to store records daily, we rely on a date in a specific format
+        // if the behaviour changes, you should adjust code to return the expected form
+        let example_date = utc_datetime!(2025-05-01 01:23);
+        let expected = "2025-05-01";
+        assert_eq!(expected, datetime_to_only_date_str(example_date));
+    }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "nym-pemstore"
+description = "Store private-public keypairs in PEM format"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+# pinned (not inherited from workspace) because this crate is imported by the ecash contract,
+# and the contracts workspace cannot be built with rustc more recent than 1.86
+rust-version = "1.86.0"
+readme.workspace = true
+publish = true
+
+[dependencies]
+pem = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }

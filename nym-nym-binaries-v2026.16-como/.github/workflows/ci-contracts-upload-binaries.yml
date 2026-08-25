@@ -1,0 +1,59 @@
+name: ci-contracts-upload-binaries
+
+on:
+  workflow_dispatch:
+
+env:
+  NETWORK: mainnet
+  S3_ENDPOINT: https://s3.nymte.ch
+  S3_BUCKET: builds
+
+jobs:
+  publish-nym-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ arc-linux-latest-dind ]
+
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare build output directory
+        shell: bash
+        env:
+          OUTPUT_DIR: ci-contract-builds/${{ github.ref_name }}
+        run: |
+          rm -rf ci-contract-builds || true
+          mkdir -p $OUTPUT_DIR
+          echo $OUTPUT_DIR
+
+      - name: Build contracts
+        run: make optimize-contracts
+
+      - name: Check optimized contracts
+        run: make docker-check-contracts
+
+      - name: Prepare build output
+        shell: bash
+        env:
+          OUTPUT_DIR: ci-contract-builds/${{ github.ref_name }}
+        run: |
+          find contracts/artifacts -maxdepth 1 -type f -name '*.wasm' -exec cp {} $OUTPUT_DIR \;
+          # Also include the optimizer-generated checksums if present
+          if [ -f contracts/artifacts/checksums.txt ]; then
+            cp contracts/artifacts/checksums.txt $OUTPUT_DIR
+          fi
+
+      - name: Publish contract builds to S3
+        continue-on-error: true
+        uses: ./.github/actions/push-to-s3
+        with:
+          source_path: ci-contract-builds/
+          destination: ""
+          endpoint: ${{ env.S3_ENDPOINT }}
+          bucket: ${{ env.S3_BUCKET }}
+          aws_access_key_id: ${{ secrets.GARAGE_AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.GARAGE_AWS_SECRET_ACCESS_KEY }}

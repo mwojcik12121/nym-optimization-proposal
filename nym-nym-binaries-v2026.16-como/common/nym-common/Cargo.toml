@@ -1,0 +1,20 @@
+[package]
+name = "nym-common"
+description = "Runtime diagnostics for high frequency logging, debugging and error handling utilities"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing.workspace = true
+tracing-test.workspace = true

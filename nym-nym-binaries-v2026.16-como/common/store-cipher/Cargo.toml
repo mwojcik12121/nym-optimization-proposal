@@ -1,0 +1,32 @@
+[package]
+name = "nym-store-cipher"
+description = "Helpers for various ciphers used throughout the Nym network"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+aes-gcm = { workspace = true }
+argon2 = { workspace = true }
+generic-array = { workspace = true, features = ["zeroize"] }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
+
+[target.'cfg(target_env = "wasm32-unknown-unknown")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+
+[features]
+default = []
+json = ["serde_json"]

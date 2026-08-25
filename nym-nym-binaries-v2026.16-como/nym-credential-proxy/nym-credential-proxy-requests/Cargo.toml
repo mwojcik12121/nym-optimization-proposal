@@ -1,0 +1,50 @@
+[package]
+name = "nym-credential-proxy-requests"
+description = "Request and response definitions for interacting with the Nym Credential Proxy"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = { workspace = true }
+schemars = { workspace = true, features = ["preserve_order", "uuid1"] }
+uuid = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_with = { workspace = true }
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+tsify = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+wasm-bindgen = { workspace = true, optional = true }
+
+## openapi:
+utoipa = { workspace = true, optional = true, features = ["uuid"] }
+
+nym-credentials = { workspace = true }
+nym-credentials-interface = { workspace = true }
+nym-http-api-common = { workspace = true, optional = true }
+nym-http-api-client = { workspace = true }
+nym-serde-helpers = { workspace = true, features = ["bs58", "date"] }
+nym-upgrade-mode-check = { workspace = true }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies.wasmtimer]
+workspace = true
+features = ["tokio"]
+
+[features]
+default = ["query-types"]
+query-types = ["nym-http-api-common", "nym-http-api-common/output"]
+openapi = ["utoipa", "nym-http-api-common/utoipa", "nym-upgrade-mode-check/openapi"]
+tsify = ["dep:tsify", "wasm-bindgen"]
+
+[lints]
+workspace = true

@@ -1,0 +1,70 @@
+{
+  "name": "@nymproject/sdk-react",
+  "version": "1.4.1",
+  "license": "Apache-2.0",
+  "author": "Nym Technologies SA",
+  "files": [
+    "dist/**/*"
+  ],
+  "browser": "dist/index.js",
+  "scripts": {
+    "build:old": "./scripts/build.sh",
+    "build:tsc": "tsc --noEmit false",
+    "clean": "rimraf dist",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "start": "tsc --noEmit true -w",
+    "storybook": "start-storybook -p 6006",
+    "storybook:build": "build-storybook",
+    "test": "node --experimental-vm-modules --no-warnings node_modules/jest/bin/jest.js -c=jest.config.mjs --no-cache",
+    "tsc": "tsc --noEmit true"
+  },
+  "dependencies": {
+    "@nymproject/sdk": ">=1.4.1-rc.3 || ^1"
+  },
+  "devDependencies": {
+    "@babel/core": "catalog:",
+    "@nymproject/eslint-config-react-typescript": "workspace:*",
+    "@storybook/addon-actions": "catalog:",
+    "@storybook/addon-essentials": "catalog:",
+    "@storybook/addon-interactions": "catalog:",
+    "@storybook/addon-links": "catalog:",
+    "@storybook/builder-webpack5": "catalog:",
+    "@storybook/manager-webpack5": "catalog:",
+    "@storybook/react": "catalog:",
+    "@storybook/testing-library": "catalog:",
+    "@svgr/webpack": "catalog:",
+    "@types/flat": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "babel-loader": "catalog:",
+    "babel-plugin-root-import": "^5.1.0",
+    "eslint": "^8.10.0",
+    "eslint-config-airbnb": "catalog:",
+    "eslint-config-airbnb-typescript": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-import-resolver-root-import": "catalog:",
+    "eslint-plugin-import": "catalog:",
+    "eslint-plugin-jest": "catalog:",
+    "eslint-plugin-jsx-a11y": "catalog:",
+    "eslint-plugin-prettier": "catalog:",
+    "eslint-plugin-react": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
+    "eslint-plugin-storybook": "catalog:",
+    "jest": "catalog:",
+    "prettier": "catalog:",
+    "rimraf": "catalog:",
+    "ts-jest": "catalog:",
+    "tsconfig-paths-webpack-plugin": "catalog:",
+    "typescript": "^4.6.2"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "private": false,
+  "type": "module",
+  "types": "./dist/index.d.ts"
+}

@@ -1,0 +1,39 @@
+[package]
+name = "nym-upgrade-mode-check"
+description = "Functions and tests for checking Nym's Credential Proxy is being properly upgraded"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+jwt-simple = { workspace = true }
+reqwest = { workspace = true, features = ["rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true, optional = true }
+
+nym-http-api-client = { workspace = true }
+nym-crypto = { workspace = true, features = ["asymmetric", "serde", "naive_jwt"] }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+time = { workspace = true, features = ["macros"] }
+nym-test-utils = { workspace = true }
+nym-crypto = { workspace = true, features = ["rand"] }
+
+
+[features]
+openapi = ["utoipa"]
+
+[lints]
+workspace = true

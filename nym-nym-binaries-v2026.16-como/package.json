@@ -1,0 +1,85 @@
+{
+  "name": "@nymproject/nymsphere",
+  "version": "1.0.1",
+  "packageManager": "pnpm@11.1.2",
+  "license": "Apache 2.0",
+  "scripts": {
+    "audit:fix": "pnpm audit --fix",
+    "build": "run-s build:types build:packages",
+    "build:ci": "run-s build:types build:packages build:wasm build:ci:sdk",
+    "build:ci:sdk": "lerna run --scope '{@nymproject/mix-tunnel,@nymproject/mix-fetch,@nymproject/mix-dns,@nymproject/mix-websocket}' build --stream",
+    "build:ci:storybook": "pnpm build && pnpm dev:on && run-p build:playground && pnpm build:ci:storybook:collect-artifacts ",
+    "build:ci:storybook:collect-artifacts": "mkdir -p ts-packages/dist && mv sdk/typescript/packages/react-components/storybook-static ts-packages/dist/storybook ",
+    "build:packages": "run-s build:packages:theme build:packages:react",
+    "build:packages:react": "lerna run --scope @nymproject/react build",
+    "build:packages:theme": "lerna run --scope @nymproject/mui-theme build",
+    "build:playground": "lerna run --scope @nymproject/react storybook:build --stream",
+    "build:types": "lerna run --scope @nymproject/types build --stream",
+    "build:wasm": "make sdk-wasm-build",
+    "clean": "lerna run clean",
+    "dev:off": "node sdk/typescript/scripts/dev-mode-remove.mjs",
+    "dev:on": "node sdk/typescript/scripts/dev-mode-add.mjs",
+    "docs:prod:build": "run-s docs:prod:build:ws",
+    "docs:prod:build:ws": "lerna run docs:prod:build --stream",
+    "lint": "echo 'linting disabled in preparation of switch to biome'",
+    "eslint:lint": "lerna run lint --stream",
+    "lint:fix": "lerna run lint:fix --stream",
+    "nuke": "npx rimraf **/node_modules node_modules dist pkg",
+    "postbuild:ci": "pnpm dev:off",
+    "prebuild:ci": "pnpm dev:on && pnpm install --frozen-lockfile false",
+    "scrub": "npx rimraf **/dist dist",
+    "sdk:build": "./sdk/typescript/scripts/build-prod-sdk.sh",
+    "sdk:publish": "./sdk/typescript/scripts/publish.sh",
+    "sdk:versions:add-rc": "cargo run -p sdk-version-bump --pre-release",
+    "sdk:versions:bump": "cargo run -p sdk-version-bump bump-version",
+    "sdk:versions:remove-rc": "cargo run -p sdk-version-bump remove-suffix",
+    "tsc": "lerna run tsc --stream",
+    "types:lint:fix": "lerna run lint:fix --scope @nymproject/types --scope @nymproject/nym-wallet-app"
+  },
+  "dependencies": {
+    "lucide-react": "^0.453.0"
+  },
+  "devDependencies": {
+    "@npmcli/node-gyp": "^3.0.0",
+    "@types/minimatch": "5.1.2",
+    "lerna": "^7.3.0",
+    "node-gyp": "^9.3.1",
+    "npm-run-all": "^4.1.5",
+    "tslog": "3.3.3"
+  },
+  "private": true,
+  "packageExtensions": {
+    "@cosmos-kit/core@*": {
+      "dependencies": {
+        "axios": "*"
+      }
+    },
+    "@cosmos-kit/keplr-extension@*": {
+      "dependencies": {
+        "long": "*"
+      }
+    },
+    "@nivo/line@*": {
+      "dependencies": {
+        "lodash": "*"
+      }
+    }
+  },
+  "overrides": {
+    "eslint": "8.57.1",
+    "@cosmjs/amino": "^0.32.4",
+    "@cosmjs/cosmwasm-stargate": "^0.32.4",
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
+    "@tauri-apps/api": "2.10.1",
+    "@types/minimatch": "5.1.2",
+    "@typescript-eslint/eslint-plugin": "5.62.0",
+    "@typescript-eslint/parser": "5.62.0",
+    "@typescript-eslint/scope-manager": "5.62.0",
+    "@typescript-eslint/type-utils": "5.62.0",
+    "@typescript-eslint/types": "5.62.0",
+    "@typescript-eslint/typescript-estree": "5.62.0",
+    "@typescript-eslint/utils": "5.62.0",
+    "cosmjs-types": "^0.9.0"
+  }
+}

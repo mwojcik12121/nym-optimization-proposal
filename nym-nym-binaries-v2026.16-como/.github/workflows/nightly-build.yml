@@ -1,0 +1,93 @@
+name: nightly-build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [ stable, beta ]
+        os: [ ubuntu-22.04, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+      IPINFO_API_TOKEN: ${{ secrets.IPINFO_API_TOKEN }}
+    continue-on-error: true
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v6
+
+      - name: Install Dependencies (Linux)
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget libssl-dev libudev-dev squashfs-tools protobuf-compiler
+        if: matrix.os == 'ubuntu-22.04'
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check formatting
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Build binaries
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --workspace
+
+      - name: Build examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --workspace --examples
+
+      # To avoid running out of disk space, skip generating debug symbols
+      - name: Set debug to false (unix)
+        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'macos-latest'
+        run: |
+          sed -i.bak 's/\[profile.dev\]/\[profile.dev\]\ndebug = false/' Cargo.toml
+          git diff
+
+      - name: Set debug to false (win)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          (Get-Content Cargo.toml) -replace '\[profile.dev\]', "`$&`ndebug = false" | Set-Content Cargo.toml
+          git diff
+
+      - name: Run unit tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace
+
+      - name: Run slow unit tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace -- --ignored
+
+      - name: Clean
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
+
+      - name: Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --workspace --all-targets -- -D warnings

@@ -1,0 +1,35 @@
+[package]
+name = "nym-ip-packet-requests"
+description = "Codec, signing functionality, and different version definitions for IP packet request and responses"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+
+[features]
+default = ["codec"]
+codec = ["dep:tokio-util"]
+test-utils = ["pnet_packet"]
+
+[dependencies]
+pnet_packet = { workspace = true, optional = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+nym-bin-common = { workspace = true }
+nym-crypto = { workspace = true }
+nym-service-provider-requests-common = { workspace = true }
+nym-sphinx = { workspace = true }
+rand = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"], optional = true }
+tracing = { workspace = true }

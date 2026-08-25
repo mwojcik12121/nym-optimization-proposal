@@ -1,0 +1,7 @@
+{
+  "name": "nym-hash-release",
+  "version": "1.0.0",
+  "description": "Generate hashes and signatures for assets in Nym releases",
+  "main": "dist/index.js",
+  "type": "module"
+}

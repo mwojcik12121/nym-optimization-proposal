@@ -1,0 +1,76 @@
+# Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "nym-compact-ecash"
+description = "Nym's ecash implementation"
+version.workspace = true
+authors = ["Ania Piotrowska <ania@nymtech.net>"]
+edition = "2021"
+license = { workspace = true }
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nym-bls12_381-fork = { workspace = true, features = ["alloc", "pairings", "experimental", "zeroize", "experimental_serde"] }
+bincode.workspace = true
+cfg-if.workspace = true
+itertools = { workspace = true }
+digest = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+bs58 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+rayon = { workspace = true, optional = true }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
+ff = { workspace = true }
+group = { workspace = true }
+subtle = { workspace = true }
+
+nym-pemstore = { workspace = true }
+nym-network-defaults = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+
+
+[[bench]]
+name = "benchmarks_group_operations"
+path = "benches/benchmarks_group_operations.rs"
+harness = false
+
+[[bench]]
+name = "benchmarks_expiration_date_signatures"
+path = "benches/benchmarks_expiration_date_signatures.rs"
+harness = false
+
+[[bench]]
+name = "benchmarks_coin_indices_signatures"
+path = "benches/benchmarks_coin_indices_signatures.rs"
+harness = false
+
+[[bench]]
+name = "benchmarks_ecash_e2e"
+path = "benches/benchmarks_ecash_e2e.rs"
+harness = false
+
+[features]
+# for 1000 coin indices it goes from ~50ms to ~400ms, but we only have to issue them once per epoch
+# so it's not really worth it
+par_signing = ["rayon"]
+
+# for this one there's an argument for it since the verification of 1000 indices can take over 6s,
+# but given it's not done very frequently, it shouldn't be too much of a problem
+# furthermore, we can't and shouldn't dedicate the entire nym-api CPU just for verification,
+# but this feature might potentially be desirable for clients.
+par_verify = ["rayon"]
+
+[lints]
+workspace = true

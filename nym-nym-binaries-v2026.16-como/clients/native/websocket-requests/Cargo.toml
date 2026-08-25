@@ -1,0 +1,21 @@
+[package]
+name = "nym-client-websocket-requests"
+description = "Request and response definitions for Nym client websocket connections"
+version.workspace = true
+authors = ["Jędrzej Stuczyński <andrew@nymtech.net>"]
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+nym-sphinx = { workspace = true }

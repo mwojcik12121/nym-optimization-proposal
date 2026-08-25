@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# used primarily for local testing
+
+set -eu
+export ENVIRONMENT=${ENVIRONMENT:-"mainnet"}
+
+crate_root=$(dirname $(realpath "$0"))
+echo crate_root=${crate_root}
+monorepo_root=$(realpath "${crate_root}/../..")
+echo monorepo_root=${monorepo_root}
+
+
+set -a
+source "${monorepo_root}/envs/${ENVIRONMENT}.env"
+set +a
+
+
+export RUST_LOG="info"
+NODE_STATUS_AGENT_SERVER_ADDRESS="http://127.0.0.1"
+NODE_STATUS_AGENT_SERVER_PORT="8000"
+SERVER="${NODE_STATUS_AGENT_SERVER_ADDRESS}|${NODE_STATUS_AGENT_SERVER_PORT}"
+# hardcoded key used only for LOCAL TESTING
+export NODE_STATUS_AGENT_AUTH_KEY=${NODE_STATUS_AGENT_AUTH_KEY_STAGING:-"BjyC9SsHAZUzPRkQR4sPTvVrp4GgaquTh5YfSJksvvWT"}
+
+workers=${1:-1}
+echo "Running $workers workers in parallel"
+
+
+function build_agent() {
+    cargo build --package nym-node-status-agent --release
+}
+
+function swarm() {
+    local workers=$1
+
+    for ((i = 1; i <= workers; i++)); do
+        ${monorepo_root}/target/release/nym-node-status-agent run-probe --server ${SERVER} \
+            --netstack-download-timeout-sec 30 \
+            --netstack-num-ping 2 \
+            --netstack-send-timeout-sec 1 \
+            --netstack-recv-timeout-sec 1 \
+            --socks5-json-rpc-url-list "https://cloudflare-eth.com;https://ethereum-rpc.publicnode.com" &
+    done
+
+    wait
+
+    echo "All agents completed"
+}
+
+build_agent
+
+swarm $workers

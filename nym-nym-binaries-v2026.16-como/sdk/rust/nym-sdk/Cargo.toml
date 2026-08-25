@@ -1,0 +1,111 @@
+[package]
+name = "nym-sdk"
+description = "Nym's Rust SDK"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository = "https://github.com/nymtech/nym/sdk/rust/nym-sdk/"
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+# documentation = "https://docs.rs/nym-sdk" Max: once we upload to crates.io and this is generated, this can be uncommented.
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "nym-proxy-server"
+path = "src/tcp_proxy/bin/proxy_server.rs"
+
+[[bin]]
+name = "nym-proxy-client"
+path = "src/tcp_proxy/bin/proxy_client.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+bip39 = { workspace = true }
+nym-client-core = { workspace = true, features = [
+    "fs-credentials-storage",
+    "fs-surb-storage",
+    "fs-gateways-storage",
+] }
+nym-crypto = { workspace = true }
+nym-gateway-requests = { workspace = true }
+nym-bandwidth-controller = { workspace = true }
+nym-bandwidth-fetcher = { workspace = true }
+nym-credentials = { workspace = true }
+nym-credentials-interface = { workspace = true }
+nym-credential-storage = { workspace = true }
+nym-network-defaults = { workspace = true }
+nym-lp-data = { workspace = true }
+nym-sphinx = { workspace = true }
+nym-statistics-common = { workspace = true }
+nym-task = { workspace = true }
+nym-topology = { workspace = true }
+nym-socks5-client-core = { workspace = true }
+nym-validator-client = { workspace = true , features = [
+    "http-client",
+] }
+nym-http-api-client = { workspace = true }
+nym-socks5-requests = { workspace = true }
+nym-ordered-buffer = { workspace = true }
+nym-service-providers-common = { workspace = true }
+nym-sphinx-addressing = { workspace = true }
+nym-bin-common = { workspace = true, features = [
+    "basic_tracing",
+] }
+bytecodec = { workspace = true }
+httpcodec = { workspace = true }
+bytes = { workspace = true }
+celes = { workspace = true }
+http = { workspace = true }
+zeroize = { workspace = true }
+
+futures = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true, features = ["small_rng"] }
+tap = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+toml = { workspace = true }
+tempfile = { workspace = true }
+
+nym-ip-packet-requests = { workspace = true, default-features = true }
+semver = { workspace = true }
+
+# tcpproxy dependencies
+clap = { workspace = true, features = ["derive"] }
+anyhow.workspace = true
+dashmap.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+uuid = { workspace = true, features = ["v4", "serde"] }
+bincode = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+dirs.workspace = true
+
+[dev-dependencies]
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+reqwest = { workspace = true, features = ["json", "socks"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+time = { workspace = true }
+nym-bin-common = {workspace = true, features = ["basic_tracing"] }
+
+# extra dependencies for libp2p examples
+#libp2p = { git = "https://github.com/ChainSafe/rust-libp2p.git", rev = "e3440d25681df380c9f0f8cfdcfd5ecc0a4f2fb6", features = [ "identify", "macros", "ping", "tokio", "tcp", "dns", "websocket", "noise", "mplex", "yamux", "gossipsub" ]}
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+parking_lot = { workspace = true }
+hex = { workspace = true }
+pnet_packet = { workspace = true }
+nym-ip-packet-requests = { workspace = true, default-features = true, features = ["test-utils"] }
+
+[features]
+libp2p-vanilla = []

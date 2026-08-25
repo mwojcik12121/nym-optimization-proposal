@@ -1,0 +1,192 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "oneOf": [
+    {
+      "description": "Look up a blacklist entry by its bs58-encoded ed25519 public key. Always returns `None` on a freshly deployed contract because the blacklist execute paths are stubbed.",
+      "type": "object",
+      "required": [
+        "get_blacklisted_account"
+      ],
+      "properties": {
+        "get_blacklisted_account": {
+          "type": "object",
+          "required": [
+            "public_key"
+          ],
+          "properties": {
+            "public_key": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Paginated listing of blacklist entries. Always empty today (see stubbed blacklist surface). Defaults: limit 50, max 75.",
+      "type": "object",
+      "required": [
+        "get_blacklist_paged"
+      ],
+      "properties": {
+        "get_blacklist_paged": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Default per-deposit price (`Config::deposit_amount`). The `GetRequiredDepositAmount` aliases are kept for backwards compatibility.",
+      "type": "object",
+      "required": [
+        "get_default_deposit_amount"
+      ],
+      "properties": {
+        "get_default_deposit_amount": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Per-address reduced deposit price override, if any. `None` for any non-whitelisted address.",
+      "type": "object",
+      "required": [
+        "get_reduced_deposit_amount"
+      ],
+      "properties": {
+        "get_reduced_deposit_amount": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Enumerate every reduced-deposit whitelist entry in ascending address order. Unpaginated by design (the whitelist is expected to stay small).",
+      "type": "object",
+      "required": [
+        "get_all_whitelisted_accounts"
+      ],
+      "properties": {
+        "get_all_whitelisted_accounts": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Look up a deposit by id. Returns `{ id, deposit: None }` when the id has not yet been assigned.",
+      "type": "object",
+      "required": [
+        "get_deposit"
+      ],
+      "properties": {
+        "get_deposit": {
+          "type": "object",
+          "required": [
+            "deposit_id"
+          ],
+          "properties": {
+            "deposit_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Most recently assigned deposit (or `{ deposit: None }` on a fresh contract). See `DepositStorage::latest_deposit`.",
+      "type": "object",
+      "required": [
+        "get_latest_deposit"
+      ],
+      "properties": {
+        "get_latest_deposit": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Paginated listing of deposits in ascending id order. Defaults: limit 50, max 100.",
+      "type": "object",
+      "required": [
+        "get_deposits_paged"
+      ],
+      "properties": {
+        "get_deposits_paged": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Aggregate statistics: global totals + per-account custom-price breakdowns. Reassembled in a single read pass from `PoolCounters` and `DepositStatsStorage`.",
+      "type": "object",
+      "required": [
+        "get_deposits_statistics"
+      ],
+      "properties": {
+        "get_deposits_statistics": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

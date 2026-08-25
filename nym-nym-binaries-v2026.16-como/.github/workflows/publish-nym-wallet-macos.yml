@@ -1,0 +1,140 @@
+name: publish-nym-wallet-macos
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+defaults:
+  run:
+    working-directory: nym-wallet
+
+jobs:
+  publish-tauri:
+    if: ${{ (startsWith(github.ref, 'refs/tags/nym-wallet-') && github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-15]
+    runs-on: ${{ matrix.platform }}
+
+    outputs:
+      release_tag: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+          
+      - name: Add Rust target for x86_64-apple-darwin
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Set Cargo build target to x86_64
+        run: echo "CARGO_BUILD_TARGET=x86_64-apple-darwin" >> $GITHUB_ENV
+          
+      - name: Install the Apple developer certificate for code signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # import certificate and provisioning profile from secrets
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode --output $CERTIFICATE_PATH
+
+          # create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Create env file
+        uses: timheuer/base64-to-file@v2.0
+        with:
+          fileName: '.env'
+          encodedString: ${{ secrets.WALLET_ADMIN_ADDRESS }}
+
+      - name: pnpm cache clean
+        shell: bash
+        run: cd .. && pnpm cache delete
+
+      - name: Install project dependencies
+        shell: bash
+        run: cd .. && pnpm i
+
+      - name: Build
+        shell: bash
+        run: cd .. && pnpm build
+
+      - name: Install dependencies and build it
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENABLE_CODE_SIGNING: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_IDENTITY_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # Tauri v2 specific environment variables
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_NOTARIZATION_USERNAME: ${{ secrets.APPLE_ID }}
+          TAURI_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TAURI_NOTARIZATION_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          pnpm build-macx86 
+
+      - name: Create app tarball
+        run: |
+          # Navigate to where the app bundle is and create the tarball
+          cd target/x86_64-apple-darwin/release/bundle/macos
+          echo "Creating tarball from app bundle"
+          tar -czf nym-wallet.app.tar.gz NymWallet.app
+          cd -
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nym-wallet.app.tar.gz
+          path: nym-wallet/target/x86_64-apple-darwin/release/bundle/macos/nym-wallet.app.tar.gz
+          retention-days: 5
+
+      - name: Clean up keychain
+        if: ${{ always() }}
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db
+          
+      - id: create-release
+        name: Upload to release based on tag name
+        uses: softprops/action-gh-release@v3
+        if: github.event_name == 'release'
+        with:
+          files: |
+            nym-wallet/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            nym-wallet/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz*
+
+  push-release-data:
+    if: ${{ (startsWith(github.ref, 'refs/tags/nym-wallet-') && github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
+    uses: ./.github/workflows/release-calculate-hash.yml
+    needs: publish-tauri
+    with:
+      release_tag: ${{ needs.publish-tauri.outputs.release_tag || github.ref_name }}
+    secrets: inherit

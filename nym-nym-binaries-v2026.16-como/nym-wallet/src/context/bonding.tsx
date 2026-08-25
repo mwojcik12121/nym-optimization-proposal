@@ -1,0 +1,369 @@
+/* eslint-disable @typescript-eslint/naming-convention */
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CurrencyDenom,
+  FeeDetails,
+  NodeConfigUpdate,
+  NodeCostParams,
+  TransactionExecuteResult,
+} from '@nymproject/types';
+import { isGateway, isMixnode, TUpdateBondArgs, isNymNode, TNymNodeSignatureArgs, TBondNymNodeArgs } from 'src/types';
+import { Console } from 'src/utils/console';
+import useGetNodeDetails from 'src/hooks/useGetNodeDetails';
+import { TBondedNymNode } from 'src/requests/nymNodeDetails';
+import { TBondedMixnode } from 'src/requests/mixnodeDetails';
+import { TBondedGateway } from 'src/requests/gatewayDetails';
+import { toPercentFloatString } from 'src/utils';
+import { AppContext } from './main';
+import {
+  claimOperatorReward,
+  unbondGateway as unbondGatewayRequest,
+  unbondMixNode as unbondMixnodeRequest,
+  unbondNymNode as unbondNymNodeRequest,
+  vestingClaimOperatorReward,
+  generateNymNodeMsgPayload as generateNymNodeMsgPayloadReq,
+  updateBond as updateBondReq,
+  migrateVestedMixnode as tauriMigrateVestedMixnode,
+  migrateLegacyMixnode as migrateLegacyMixnodeReq,
+  migrateLegacyGateway as migrateLegacyGatewayReq,
+  bondNymNode,
+  updateNymNodeConfig as updateNymNodeConfigReq,
+  updateNymNodeParams,
+} from '../requests';
+
+export type TBondedNode = TBondedMixnode | TBondedGateway | TBondedNymNode;
+
+export type TBondingContext = {
+  isLoading: boolean;
+  error?: string;
+  bondedNode?: TBondedNode | null;
+  isVestingAccount: boolean;
+  refresh: () => void;
+  unbond: (fee?: FeeDetails) => Promise<TransactionExecuteResult | undefined>;
+  bond: (args: TBondNymNodeArgs) => Promise<TransactionExecuteResult | undefined>;
+  updateBondAmount: (data: TUpdateBondArgs) => Promise<TransactionExecuteResult | undefined>;
+  updateNymNodeConfig: (data: NodeConfigUpdate, fee?: FeeDetails) => Promise<TransactionExecuteResult | undefined>;
+  redeemRewards: (fee?: FeeDetails) => Promise<TransactionExecuteResult | undefined>;
+  generateNymNodeMsgPayload: (data: TNymNodeSignatureArgs) => Promise<string | undefined>;
+  migrateVestedMixnode: () => Promise<TransactionExecuteResult | undefined>;
+  migrateLegacyNode: () => Promise<TransactionExecuteResult | undefined>;
+  updateCostParameters: (
+    profitMarginPercent: string,
+    intervalOperatingCost: string,
+    fee?: FeeDetails,
+  ) => Promise<TransactionExecuteResult | undefined>;
+};
+
+export const BondingContext = createContext<TBondingContext>({
+  isLoading: true,
+  refresh: async () => undefined,
+  bond: async () => {
+    throw new Error('Not implemented');
+  },
+  unbond: async () => {
+    throw new Error('Not implemented');
+  },
+  updateBondAmount: async () => {
+    throw new Error('Not implemented');
+  },
+  updateNymNodeConfig: async () => {
+    throw new Error('Not implemented');
+  },
+  redeemRewards: async () => {
+    throw new Error('Not implemented');
+  },
+  generateNymNodeMsgPayload: async () => {
+    throw new Error('Not implemented');
+  },
+  migrateVestedMixnode: async () => {
+    throw new Error('Not implemented');
+  },
+  migrateLegacyNode: async () => {
+    throw new Error('Not implemented');
+  },
+  updateCostParameters: async (_profitMarginPercent, _intervalOperatingCost, _fee) => {
+    throw new Error('Not implemented');
+  },
+  isVestingAccount: false,
+});
+
+export const BondingContextProvider: FCWithChildren = ({ children }): React.JSX.Element => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  /** Bumped on `refresh()` so late async handlers cannot re-surface a dismissed error. */
+  const operationEpochRef = useRef(0);
+
+  const [isVestingAccount, setIsVestingAccount] = useState(false);
+
+  const { userBalance, clientDetails, network } = useContext(AppContext);
+
+  const {
+    bondedNode,
+    isLoading: isBondedNodeLoading,
+    getNodeDetails,
+  } = useGetNodeDetails(clientDetails?.client_address, network);
+
+  useEffect(() => {
+    userBalance.fetchBalance();
+  }, [clientDetails]);
+
+  useEffect(() => {
+    if (userBalance.originalVesting) {
+      setIsVestingAccount(true);
+    }
+  }, [userBalance]);
+
+  const resetState = () => {
+    setError(undefined);
+    setIsLoading(false);
+  };
+
+  const refresh = () => {
+    operationEpochRef.current += 1;
+    resetState();
+  };
+
+  const setErrorIfCurrent = (epoch: number, message: string) => {
+    if (epoch === operationEpochRef.current) {
+      setError(message);
+    }
+  };
+
+  const setLoadingIfCurrent = (epoch: number, loading: boolean) => {
+    if (epoch === operationEpochRef.current) {
+      setIsLoading(loading);
+    }
+  };
+
+  const bond = async (data: TBondNymNodeArgs) => {
+    const epoch = operationEpochRef.current;
+    let tx;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+
+    try {
+      tx = await bondNymNode({
+        ...data,
+        costParams: {
+          ...data.costParams,
+          profit_margin_percent: toPercentFloatString(data.costParams.profit_margin_percent),
+        },
+      });
+      if (clientDetails?.client_address) {
+        await getNodeDetails(clientDetails?.client_address);
+      }
+    } catch (e) {
+      Console.warn(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e as string}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return tx;
+  };
+
+  const unbond = async (fee?: FeeDetails) => {
+    const epoch = operationEpochRef.current;
+    let tx;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      if (bondedNode && isNymNode(bondedNode)) tx = await unbondNymNodeRequest(fee?.fee);
+      if (bondedNode && isMixnode(bondedNode) && !bondedNode.proxy) tx = await unbondMixnodeRequest(fee?.fee);
+      if (bondedNode && isGateway(bondedNode) && !bondedNode.proxy) tx = await unbondGatewayRequest(fee?.fee);
+      return tx;
+    } catch (e) {
+      Console.warn(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e as string}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const updateNymNodeConfig = async (data: NodeConfigUpdate, fee?: FeeDetails) => {
+    const epoch = operationEpochRef.current;
+    let tx;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      tx = await updateNymNodeConfigReq(data, fee?.fee);
+      if (clientDetails?.client_address) {
+        await getNodeDetails(clientDetails?.client_address);
+      }
+      return tx;
+    } catch (e) {
+      Console.warn(e);
+      const message = `an error occurred: ${e}`;
+      setErrorIfCurrent(epoch, message);
+      throw new Error(message);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+  };
+
+  const redeemRewards = async (fee?: FeeDetails) => {
+    const epoch = operationEpochRef.current;
+    let tx;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      if (bondedNode && !isNymNode(bondedNode)) tx = await vestingClaimOperatorReward(fee?.fee);
+      else tx = await claimOperatorReward(fee?.fee);
+      return tx;
+    } catch (e: any) {
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const updateBondAmount = async (data: TUpdateBondArgs) => {
+    const epoch = operationEpochRef.current;
+    let tx: TransactionExecuteResult | undefined;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      tx = await updateBondReq(data);
+      await userBalance.fetchBalance();
+
+      return tx;
+    } catch (e: any) {
+      Console.warn(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const generateNymNodeMsgPayload = async (data: TNymNodeSignatureArgs) => {
+    const epoch = operationEpochRef.current;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+
+    try {
+      const message = await generateNymNodeMsgPayloadReq({
+        nymnode: data.nymnode,
+        pledge: data.pledge,
+        costParams: {
+          ...data.costParams,
+          profit_margin_percent: toPercentFloatString(data.costParams.profit_margin_percent),
+        },
+      });
+      return message;
+    } catch (e) {
+      Console.warn(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const migrateVestedMixnode = async () => {
+    const epoch = operationEpochRef.current;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      const tx = await tauriMigrateVestedMixnode();
+      return tx;
+    } catch (e) {
+      Console.error(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const migrateLegacyNode = async () => {
+    const epoch = operationEpochRef.current;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      let tx: TransactionExecuteResult | undefined;
+
+      if (bondedNode && isMixnode(bondedNode)) {
+        tx = await migrateLegacyMixnodeReq();
+      }
+      if (bondedNode && isGateway(bondedNode)) {
+        tx = await migrateLegacyGatewayReq();
+      }
+      return tx;
+    } catch (e) {
+      Console.error(e);
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+    return undefined;
+  };
+
+  const updateCostParameters = async (
+    profitMarginPercent: string,
+    intervalOperatingCost: string,
+    fee?: FeeDetails,
+  ): Promise<TransactionExecuteResult | undefined> => {
+    const epoch = operationEpochRef.current;
+    let tx;
+    setError(undefined);
+    setLoadingIfCurrent(epoch, true);
+    try {
+      // Validate input before proceeding
+      if (!profitMarginPercent || parseFloat(profitMarginPercent) < 20 || parseFloat(profitMarginPercent) > 50) {
+        throw new Error(':%');
+      }
+
+      // Convert from percentage to decimal
+      const decimalProfitMargin = (parseFloat(profitMarginPercent) / 100).toString();
+
+      const operatingCost = intervalOperatingCost || '0';
+
+      const costParams: NodeCostParams = {
+        profit_margin_percent: decimalProfitMargin,
+        interval_operating_cost: {
+          denom: 'unym' as CurrencyDenom,
+          amount: operatingCost,
+        },
+      };
+
+      tx = await updateNymNodeParams(costParams, fee?.fee);
+
+      if (clientDetails?.client_address) {
+        await getNodeDetails(clientDetails?.client_address);
+      }
+
+      return tx;
+    } catch (e) {
+      setErrorIfCurrent(epoch, `an error occurred: ${e}`);
+      throw e;
+    } finally {
+      setLoadingIfCurrent(epoch, false);
+    }
+  };
+
+  const memoizedValue = useMemo(
+    () => ({
+      isLoading: isLoading || isBondedNodeLoading,
+      error,
+      bondedNode,
+      bond,
+      unbond,
+      refresh,
+      redeemRewards,
+      updateBondAmount,
+      updateNymNodeConfig,
+      generateNymNodeMsgPayload,
+      migrateVestedMixnode,
+      migrateLegacyNode,
+      isVestingAccount,
+      updateCostParameters,
+    }),
+    [isLoading, error, bondedNode, isVestingAccount, isBondedNodeLoading],
+  );
+
+  return <BondingContext.Provider value={memoizedValue}>{children}</BondingContext.Provider>;
+};
+
+export const useBondingContext = () => useContext<TBondingContext>(BondingContext);

@@ -1,0 +1,651 @@
+// Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
+use super::DEFAULT_NYMNODE_ID;
+use crate::config;
+use crate::config::default_config_filepath;
+use crate::env::vars::*;
+use crate::error::NymNodeError;
+use celes::Country;
+use clap::Args;
+use clap::builder::ArgPredicate;
+use nym_crypto::asymmetric::ed25519;
+use std::net::{IpAddr, SocketAddr};
+use std::path::{Path, PathBuf};
+use url::Url;
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[derive(Args, Debug)]
+pub(crate) struct ConfigArgs {
+    /// Id of the nym-node to use
+    #[clap(
+        long,
+        default_value = DEFAULT_NYMNODE_ID,
+        default_value_if("config_file", ArgPredicate::IsPresent, None),
+        env = NYMNODE_ID_ARG,
+        group = "config"
+    )]
+    id: Option<String>,
+
+    /// Path to a configuration file of this node.
+    #[clap(
+        long,
+        env = NYMNODE_CONFIG_PATH_ARG,
+        group = "config"
+    )]
+    config_file: Option<PathBuf>,
+}
+
+impl ConfigArgs {
+    pub(crate) fn id(&self) -> &Option<String> {
+        &self.id
+    }
+
+    pub(crate) fn config_path(&self) -> PathBuf {
+        // SAFETY:
+        // if `config_file` hasn't been specified, `id` will default to "DEFAULT_NYMNODE_ID",
+        // so some value will always be available to use
+        #[allow(clippy::unwrap_used)]
+        self.config_file
+            .clone()
+            .unwrap_or_else(|| default_config_filepath(self.id.as_ref().unwrap()))
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct HostArgs {
+    /// Comma separated list of public ip addresses that will be announced to the nym-api and subsequently to the clients.
+    /// In nearly all circumstances, it's going to be identical to the address you're going to use for bonding.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        env = NYMNODE_PUBLIC_IPS_ARG
+    )]
+    pub(crate) public_ips: Option<Vec<IpAddr>>,
+
+    /// Optional hostname associated with this gateway that will be announced to the nym-api and subsequently to the clients
+    #[clap(
+        long,
+        env = NYMNODE_HOSTNAME_ARG
+    )]
+    pub(crate) hostname: Option<String>,
+
+    /// Optional **physical** location of this node's server.
+    /// Either full country name (e.g. 'Poland'), two-letter alpha2 (e.g. 'PL'),
+    /// three-letter alpha3 (e.g. 'POL') or three-digit numeric-3 (e.g. '616') can be provided.
+    #[clap(
+        long,
+        env = NYMNODE_LOCATION_ARG
+    )]
+    pub(crate) location: Option<Country>,
+}
+
+impl HostArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section(self) -> config::Host {
+        self.override_config_section(config::Host::default())
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::Host) -> config::Host {
+        if let Some(public_ips) = self.public_ips {
+            section.public_ips = public_ips
+        }
+        if let Some(hostname) = self.hostname {
+            section.hostname = Some(hostname)
+        }
+        if let Some(location) = self.location {
+            section.location = Some(location)
+        }
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct HttpArgs {
+    /// Socket address this node will use for binding its http API.
+    /// default: `[::]:8080`
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_BIND_ADDRESS_ARG
+    )]
+    pub(crate) http_bind_address: Option<SocketAddr>,
+
+    /// Path to assets directory of custom landing page of this node.
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_LANDING_ASSETS_ARG
+    )]
+    pub(crate) landing_page_assets_path: Option<PathBuf>,
+
+    /// An optional bearer token for accessing certain http endpoints.
+    /// Currently only used for prometheus metrics.
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_ACCESS_TOKEN_ARG,
+        alias = "http-bearer-token"
+    )]
+    pub(crate) http_access_token: Option<String>,
+
+    /// Specify whether basic system information should be exposed.
+    /// default: true
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_EXPOSE_SYSTEM_INFO_ARG,
+    )]
+    pub(crate) expose_system_info: Option<bool>,
+
+    /// Specify whether basic system hardware information should be exposed.
+    /// default: true
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_EXPOSE_SYSTEM_HARDWARE_ARG
+    )]
+    pub(crate) expose_system_hardware: Option<bool>,
+
+    /// Specify whether detailed system crypto hardware information should be exposed.
+    /// default: true
+    #[clap(
+        long,
+        env = NYMNODE_HTTP_EXPOSE_CRYPTO_HARDWARE_ARG
+    )]
+    pub(crate) expose_crypto_hardware: Option<bool>,
+}
+
+impl HttpArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section(self) -> config::Http {
+        self.override_config_section(config::Http::default())
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::Http) -> config::Http {
+        if let Some(bind_address) = self.http_bind_address {
+            section.bind_address = bind_address
+        }
+        if let Some(landing_page_assets_path) = self.landing_page_assets_path {
+            section.landing_page_assets_path = Some(landing_page_assets_path)
+        }
+        if let Some(access_token) = self.http_access_token {
+            section.access_token = Some(access_token)
+        }
+        if let Some(expose_system_info) = self.expose_system_info {
+            section.expose_system_info = expose_system_info
+        }
+        if let Some(expose_hardware_info) = self.expose_system_hardware {
+            section.expose_system_hardware = expose_hardware_info
+        }
+        if let Some(expose_crypto_hardware) = self.expose_crypto_hardware {
+            section.expose_crypto_hardware = expose_crypto_hardware
+        }
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct NyxArgs {
+    /// Addresses to nyxd chain endpoint which the node will use for chain interactions.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        env = NYMNODE_NYXD_URLS_ARG
+    )]
+    pub(crate) nyxd_urls: Option<Vec<Url>>,
+
+    #[clap(
+        long,
+        env = NYMNODE_NYXD_WEBSOCKET_URL_ARG
+    )]
+    /// Url to the websocket endpoint of a nyx validator, for example `wss://rpc.nymtech.net/websocket`.
+    /// It is used for subscribing to new block events.
+    pub(crate) nyxd_websocket_url: Option<Url>,
+}
+
+impl NyxArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section(self) -> config::Nyx {
+        self.override_config_section(config::Nyx::default())
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::Nyx) -> config::Nyx {
+        if let Some(nyxd_urls) = self.nyxd_urls {
+            section.nyxd_urls = nyxd_urls
+        }
+
+        if let Some(websocket) = self.nyxd_websocket_url {
+            section.nyxd_websocket_url = websocket
+        }
+
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct MixnetArgs {
+    /// Address this node will bind to for listening for mixnet packets
+    /// default: `[::]:1789`
+    #[clap(
+        long,
+        env = NYMNODE_MIXNET_BIND_ADDRESS_ARG
+    )]
+    pub(crate) mixnet_bind_address: Option<SocketAddr>,
+
+    /// If applicable, custom port announced in the self-described API that other clients and nodes
+    /// will use.
+    /// Useful when the node is behind a proxy.
+    #[clap(
+        long,
+        env = NYMNODE_MIXNET_ANNOUNCE_PORT_ARG
+    )]
+    pub(crate) mixnet_announce_port: Option<u16>,
+
+    /// Addresses to nym APIs from which the node gets the view of the network.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        env = NYMNODE_NYM_APIS_ARG
+    )]
+    pub(crate) nym_api_urls: Option<Vec<Url>>,
+
+    /// Specifies whether this node should **NOT** use noise protocol in the connections (currently not implemented)
+    #[clap(
+        hide = true,
+        long,
+        env = NYMNODE_UNSAFE_DISABLE_NOISE
+    )]
+    pub(crate) unsafe_disable_noise: bool,
+
+    /// Specifies whether this node should **NOT** be using replay protection
+    #[clap(
+        hide = true,
+        long,
+        env = NYMNODE_UNSAFE_DISABLE_REPLAY_PROTECTION
+    )]
+    pub(crate) unsafe_disable_replay_protection: bool,
+}
+
+impl MixnetArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section<P: AsRef<Path>>(self, data_dir: P) -> config::Mixnet {
+        self.override_config_section(config::Mixnet::new_default(data_dir))
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::Mixnet) -> config::Mixnet {
+        if let Some(bind_address) = self.mixnet_bind_address {
+            section.bind_address = bind_address
+        }
+        if let Some(mixnet_announce_port) = self.mixnet_announce_port {
+            section.announce_port = Some(mixnet_announce_port)
+        }
+        if let Some(nym_api_urls) = self.nym_api_urls {
+            section.nym_api_urls = nym_api_urls
+        }
+        if self.unsafe_disable_noise {
+            section.debug.unsafe_disable_noise = true
+        }
+        if self.unsafe_disable_replay_protection {
+            section.replay_protection.debug.unsafe_disabled = true
+        }
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct WireguardArgs {
+    /// Specifies whether the wireguard service is enabled on this node.
+    #[clap(
+        long,
+        env = NYMNODE_WG_ENABLED_ARG
+    )]
+    pub(crate) wireguard_enabled: Option<bool>,
+
+    /// Socket address this node will use for binding its wireguard interface.
+    /// default: `[::]:51822`
+    #[clap(
+        long,
+        env = NYMNODE_WG_BIND_ADDRESS_ARG
+    )]
+    pub(crate) wireguard_bind_address: Option<SocketAddr>,
+
+    /// Tunnel port announced to external clients wishing to connect to the wireguard interface.
+    /// Useful in the instances where the node is behind a proxy.
+    #[clap(
+        long,
+        env = NYMNODE_WG_ANNOUNCED_PORT_ARG
+    )]
+    pub(crate) wireguard_tunnel_announced_port: Option<u16>,
+
+    /// The prefix denoting the maximum number of the clients that can be connected via Wireguard.
+    /// The maximum value for IPv4 is 32 and for IPv6 is 128
+    #[clap(
+        long,
+        env = NYMNODE_WG_PRIVATE_NETWORK_PREFIX_ARG
+    )]
+    pub(crate) wireguard_private_network_prefix: Option<u8>,
+
+    /// Use userspace implementation of WireGuard (wireguard-go) instead of kernel module.
+    /// Useful in containerized environments without kernel WireGuard support.
+    #[clap(
+        long,
+        env = NYMNODE_WG_USERSPACE_ARG
+    )]
+    pub(crate) wireguard_userspace: Option<bool>,
+}
+
+impl WireguardArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section<P: AsRef<Path>>(self, data_dir: P) -> config::Wireguard {
+        self.override_config_section(config::Wireguard::new_default(data_dir))
+    }
+
+    pub(crate) fn override_config_section(
+        self,
+        mut section: config::Wireguard,
+    ) -> config::Wireguard {
+        if let Some(enabled) = self.wireguard_enabled {
+            section.enabled = enabled
+        }
+
+        if let Some(bind_address) = self.wireguard_bind_address {
+            section.bind_address = bind_address
+        }
+
+        if let Some(announced_tunnel_port) = self.wireguard_tunnel_announced_port {
+            section.announced_tunnel_port = announced_tunnel_port
+        }
+
+        if let Some(private_network_prefix) = self.wireguard_private_network_prefix {
+            section.private_network_prefix_v4 = private_network_prefix
+        }
+
+        if let Some(userspace) = self.wireguard_userspace {
+            section.use_userspace = userspace
+        }
+
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerlocArgs {
+    /// Socket address this node will use for binding its verloc API.
+    /// default: `[::]:1790`
+    #[clap(
+        long,
+        env = NYMNODE_VERLOC_BIND_ADDRESS_ARG
+    )]
+    pub(crate) verloc_bind_address: Option<SocketAddr>,
+
+    /// If applicable, custom port announced in the self-described API that other clients and nodes
+    /// will use.
+    /// Useful when the node is behind a proxy.
+    #[clap(
+        long,
+        env = NYMNODE_VERLOC_ANNOUNCE_PORT_ARG
+    )]
+    pub(crate) verloc_announce_port: Option<u16>,
+}
+
+impl VerlocArgs {
+    pub(crate) fn build_config_section(self) -> config::Verloc {
+        self.override_config_section(config::Verloc::default())
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::Verloc) -> config::Verloc {
+        if let Some(bind_address) = self.verloc_bind_address {
+            section.bind_address = bind_address
+        }
+        if let Some(announce_port) = self.verloc_announce_port {
+            section.announce_port = Some(announce_port)
+        }
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct MetricsArgs {
+    /// Specify whether running statistics of this node should be logged to the console.
+    #[clap(
+        long,
+        env = NYMNODE_ENABLE_CONSOLE_LOGGING
+    )]
+    enable_console_logging: Option<bool>,
+}
+
+impl MetricsArgs {
+    pub(crate) fn build_config_section(self) -> config::MetricsConfig {
+        self.override_config_section(config::MetricsConfig::default())
+    }
+
+    pub(crate) fn override_config_section(
+        self,
+        mut section: config::MetricsConfig,
+    ) -> config::MetricsConfig {
+        if let Some(enable_console_logging) = self.enable_console_logging {
+            section.debug.log_stats_to_console = enable_console_logging;
+        }
+        section
+    }
+}
+
+#[derive(clap::Args, Debug, Zeroize, ZeroizeOnDrop)]
+pub(crate) struct EntryGatewayArgs {
+    /// Socket address this node will use for binding its client websocket API.
+    /// default: `[::]:9000`
+    #[clap(
+        long,
+        env = NYMNODE_ENTRY_BIND_ADDRESS_ARG
+    )]
+    #[zeroize(skip)]
+    pub(crate) entry_bind_address: Option<SocketAddr>,
+
+    /// Custom announced port for listening for websocket client traffic.
+    /// If unspecified, the value from the `bind_address` will be used instead
+    #[clap(
+        long,
+        env = NYMNODE_ENTRY_ANNOUNCE_WS_PORT_ARG
+    )]
+    pub(crate) announce_ws_port: Option<u16>,
+
+    /// If applicable, announced port for listening for secure websocket client traffic.
+    #[clap(
+        long,
+        env = NYMNODE_ENTRY_ANNOUNCE_WSS_PORT_ARG
+    )]
+    pub(crate) announce_wss_port: Option<u16>,
+
+    /// Indicates whether this gateway is accepting only coconut credentials for accessing the mixnet
+    /// or if it also accepts non-paying clients
+    #[clap(
+        long,
+        env = NYMNODE_ENFORCE_ZK_NYMS_ARG
+    )]
+    pub(crate) enforce_zk_nyms: Option<bool>,
+
+    /// Custom cosmos wallet mnemonic used for zk-nym redemption.
+    /// If no value is provided, a fresh mnemonic is going to be generated.
+    #[clap(
+        long,
+        env = NYMNODE_MNEMONIC_ARG
+    )]
+    pub(crate) mnemonic: Option<bip39::Mnemonic>,
+
+    /// Endpoint to query to retrieve current upgrade mode attestation.
+    /// This argument should never be set outside testnets and local networks.
+    #[clap(
+        long,
+        env = NYMNODE_UPGRADE_MODE_ATTESTATION_URL_ARG
+    )]
+    #[zeroize(skip)]
+    pub(crate) upgrade_mode_attestation_url: Option<Url>,
+
+    /// Expected public key of the entity signing the published attestation.
+    /// This argument should never be set outside testnets and local networks.
+    #[clap(
+        long,
+        env = NYMNODE_UPGRADE_MODE_ATTESTER_PUBKEY_ARG
+    )]
+    #[zeroize(skip)]
+    pub(crate) upgrade_mode_attester_public_key: Option<ed25519::PublicKey>,
+}
+
+impl EntryGatewayArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section<P: AsRef<Path>>(
+        self,
+        data_dir: P,
+    ) -> Result<config::GatewayTasksConfig, NymNodeError> {
+        Ok(self.override_config_section(config::GatewayTasksConfig::new(data_dir)?))
+    }
+
+    pub(crate) fn override_config_section(
+        mut self,
+        mut section: config::GatewayTasksConfig,
+    ) -> config::GatewayTasksConfig {
+        if let Some(bind_address) = self.entry_bind_address {
+            section.ws_bind_address = bind_address
+        }
+        if let Some(ws_port) = self.announce_ws_port {
+            section.announce_ws_port = Some(ws_port)
+        }
+        if let Some(wss_port) = self.announce_wss_port {
+            section.announce_wss_port = Some(wss_port)
+        }
+        if let Some(enforce_zk_nyms) = self.enforce_zk_nyms {
+            section.enforce_zk_nyms = enforce_zk_nyms
+        }
+        if let Some(upgrade_mode_attestation_url) = self.upgrade_mode_attestation_url.take() {
+            section.upgrade_mode.attestation_url = upgrade_mode_attestation_url
+        }
+        if let Some(upgrade_mode_attester_public_key) = self.upgrade_mode_attester_public_key {
+            section.upgrade_mode.attester_public_key = upgrade_mode_attester_public_key
+        }
+
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ExitGatewayArgs {
+    /// Specifies the url for an upstream source of the exit policy used by this node.
+    #[clap(
+        long,
+        env = NYMNODE_UPSTREAM_EXIT_POLICY_ARG,
+    )]
+    pub(crate) upstream_exit_policy_url: Option<Url>,
+
+    /// Specifies whether this exit node should run in 'open-proxy' mode
+    /// and thus would attempt to resolve **ANY** request it receives.
+    #[clap(
+        long,
+        env = NYMNODE_OPEN_PROXY_ARG,
+    )]
+    pub(crate) open_proxy: Option<bool>,
+
+    /// Allow the network requester to forward traffic to non-globally-routable
+    /// addresses. Intended for local development, private-network deployments,
+    /// and testnet scenarios.
+    /// Not recommended on production exit gateway unless you know what you're doing.
+    #[clap(
+        long,
+        env = NYMNODE_NR_ALLOW_LOCAL_IPS_ARG,
+    )]
+    pub(crate) nr_allow_local_ips: Option<bool>,
+
+    /// Allow the IP packet router to forward traffic to non-globally-routable
+    /// addresses. Intended for local development, private-network deployments,
+    /// and testnet scenarios.
+    /// Not recommended on production exit gateway unless you know what you're doing.
+    #[clap(
+        long,
+        env = NYMNODE_IPR_ALLOW_LOCAL_IPS_ARG,
+    )]
+    pub(crate) ipr_allow_local_ips: Option<bool>,
+}
+
+impl ExitGatewayArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section<P: AsRef<Path>>(
+        self,
+        data_dir: P,
+    ) -> config::ServiceProvidersConfig {
+        self.override_config_section(config::ServiceProvidersConfig::new_default(data_dir))
+    }
+
+    pub(crate) fn override_config_section(
+        self,
+        mut section: config::ServiceProvidersConfig,
+    ) -> config::ServiceProvidersConfig {
+        if let Some(upstream_exit_policy) = self.upstream_exit_policy_url {
+            section.upstream_exit_policy_url = upstream_exit_policy
+        }
+        if let Some(open_proxy) = self.open_proxy {
+            section.open_proxy = open_proxy
+        }
+        if let Some(allow_local_ips) = self.nr_allow_local_ips {
+            section.network_requester.allow_local_ips = allow_local_ips
+        }
+        if let Some(allow_local_ips) = self.ipr_allow_local_ips {
+            section.ip_packet_router.allow_local_ips = allow_local_ips
+        }
+
+        section
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct LpArgs {
+    /// Bind address for the TCP LP control traffic.
+    /// default: `[::]:41264`
+    #[clap(
+        long,
+        env = NYMNODE_LP_CONTROL_BIND_ADDRESS_ARG
+    )]
+    pub(crate) lp_control_bind_address: Option<SocketAddr>,
+
+    /// Custom announced port for listening for the TCP LP control traffic.
+    /// If unspecified, the value from the `lp_control_bind_address` will be used instead
+    #[clap(
+        long,
+        env = NYMNODE_LP_CONTROL_ANNOUNCE_PORT_ARG
+    )]
+    pub(crate) lp_control_announce_port: Option<u16>,
+
+    /// Bind address for the UDP LP data traffic.
+    /// default: `[::]:51264`
+    #[clap(
+        long,
+        env = NYMNODE_LP_DATA_BIND_ADDRESS_ARG
+    )]
+    pub(crate) lp_data_bind_address: Option<SocketAddr>,
+
+    /// Custom announced port for listening for the UDP LP data traffic.
+    /// If unspecified, the value from the `lp_data_bind_address` will be used instead
+    #[clap(
+        long,
+        env = NYMNODE_LP_DATA_ANNOUNCE_PORT_ARG
+    )]
+    pub(crate) lp_data_announce_port: Option<u16>,
+
+    /// Use mock ecash manager for LP testing.
+    /// WARNING: Only use this for local testing! Never enable in production.
+    /// When enabled, the LP listener will accept any credential without blockchain verification.
+    #[clap(
+        long,
+        env = NYMNODE_LP_USE_MOCK_ECASH_ARG
+    )]
+    pub(crate) lp_use_mock_ecash: Option<bool>,
+}
+
+impl LpArgs {
+    // TODO: could we perhaps make a clap error here and call `safe_exit` instead?
+    pub(crate) fn build_config_section(self) -> config::LpConfig {
+        self.override_config_section(config::LpConfig::default())
+    }
+
+    pub(crate) fn override_config_section(self, mut section: config::LpConfig) -> config::LpConfig {
+        if let Some(use_mock_ecash) = self.lp_use_mock_ecash {
+            section.debug.use_mock_ecash = use_mock_ecash
+        }
+
+        section
+    }
+}

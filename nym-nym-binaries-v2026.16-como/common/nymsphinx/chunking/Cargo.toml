@@ -1,0 +1,34 @@
+[package]
+name = "nym-sphinx-chunking"
+description = "Sphinx packet chunking of underlying data packets"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+dashmap = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+utoipa = { workspace = true }
+
+nym-sphinx-addressing = { workspace = true }
+nym-sphinx-params = { workspace = true }
+nym-sphinx-types = { workspace = true }
+nym-metrics = { workspace = true }
+nym-crypto = { workspace = true, features = [
+    "asymmetric",
+] }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies.wasmtimer]
+workspace = true

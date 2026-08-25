@@ -1,0 +1,51 @@
+[package]
+name = "nym-client-wasm"
+description = "A webassembly client which can be used to interact with the the Nym privacy platform. Wasm is used for Sphinx packet generation."
+version = "1.4.1"
+authors = [
+    "Dave Hrycyszyn <futurechimp@users.noreply.github.com>",
+    "Jedrzej Stuczynski <andrew@nymtech.net>",
+]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/nymtech/nym"
+rust-version = "1.85"
+publish = false
+keywords = ["nym", "sphinx", "wasm", "webassembly", "privacy"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = { workspace = true }
+futures = { workspace = true }
+js-sys = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+gloo-timers = { workspace = true }
+once_cell = { workspace = true }
+
+thiserror = { workspace = true }
+tsify = { workspace = true, features = ["js"] }
+web-sys = { workspace = true }
+
+nym-bin-common = { workspace = true }
+nym-wasm-client-core = { workspace = true }
+nym-wasm-utils = { workspace = true }
+nym-gateway-requests = { workspace = true }
+
+tokio_with_wasm = { workspace = true, features = ["full"] }
+
+
+[dev-dependencies]
+wasm-bindgen-test = { workspace = true }
+
+[features]
+default = []
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

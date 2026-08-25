@@ -1,0 +1,26 @@
+[package]
+name = "nym-wasm-storage"
+description = "indexeddb-backed in-browser storage with optional encryption implentation and helpers"
+version.workspace = true
+authors = ["Jedrzej Stuczynski <andrew@nymtech.net>"]
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = { workspace = true }
+wasm-bindgen = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde-wasm-bindgen = { workspace = true }
+indexed_db_futures = { workspace = true }
+thiserror = { workspace = true }
+
+nym-store-cipher = { workspace = true, features = ["json"] }
+nym-wasm-utils = { workspace = true }

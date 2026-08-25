@@ -1,0 +1,194 @@
+// Copyright 2024-2026 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: Apache-2.0
+
+use nym_api_requests::models::described::type_translation::DeclaredRolesV1;
+use nym_api_requests::nym_nodes::SkimmedNodeV1;
+use nym_crypto::asymmetric::{ed25519, x25519};
+use nym_mixnet_contract_common::NodeId;
+use nym_sphinx_addressing::nodes::NymNodeRoutingAddress;
+use nym_sphinx_types::Node as SphinxNode;
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use std::net::{IpAddr, SocketAddr};
+use thiserror::Error;
+
+pub use nym_mixnet_contract_common::LegacyMixLayer;
+
+#[derive(Error, Debug)]
+pub enum RoutingNodeError {
+    #[error("node {node_id} ('{identity}') has not provided any valid ip addresses")]
+    NoIpAddressesProvided { node_id: NodeId, identity: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EntryDetails {
+    // to allow client to choose ipv6 preference, if available
+    pub ip_addresses: Vec<IpAddr>,
+    pub clients_ws_port: u16,
+    pub hostname: Option<String>,
+    pub clients_wss_port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SupportedRoles {
+    pub mixnode: bool,
+    pub mixnet_entry: bool,
+    pub mixnet_exit: bool,
+}
+
+impl From<DeclaredRolesV1> for SupportedRoles {
+    fn from(value: DeclaredRolesV1) -> Self {
+        SupportedRoles {
+            mixnode: value.mixnode,
+            mixnet_entry: value.entry,
+            mixnet_exit: value.exit_nr && value.exit_ipr,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RoutingNode {
+    pub node_id: NodeId,
+
+    pub mix_host: SocketAddr,
+
+    pub entry: Option<EntryDetails>,
+    pub identity_key: ed25519::PublicKey,
+    pub sphinx_key: x25519::PublicKey,
+
+    pub supported_roles: SupportedRoles,
+}
+
+impl Debug for RoutingNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoutingNode")
+            .field("node_id", &self.node_id)
+            .field("mix_host", &self.mix_host)
+            .field("entry", &self.entry)
+            .field("identity_key", &self.identity_key.to_base58_string())
+            .field("sphinx_key", &self.sphinx_key.to_base58_string())
+            .field("supported_roles", &self.supported_roles)
+            .finish()
+    }
+}
+
+impl RoutingNode {
+    pub fn ws_entry_address_tls(&self) -> Option<String> {
+        let entry = self.entry.as_ref()?;
+        let hostname = entry.hostname.as_ref()?;
+        let wss_port = entry.clients_wss_port?;
+
+        Some(format!("wss://{hostname}:{wss_port}"))
+    }
+
+    pub fn ws_entry_address_no_tls(&self, prefer_ipv6: bool) -> Option<String> {
+        let entry = self.entry.as_ref()?;
+
+        if let Some(hostname) = entry.hostname.as_ref() {
+            return Some(format!("ws://{hostname}:{}", entry.clients_ws_port));
+        }
+
+        if prefer_ipv6 && let Some(ipv6) = entry.ip_addresses.iter().find(|ip| ip.is_ipv6()) {
+            return Some(format!("ws://{ipv6}:{}", entry.clients_ws_port));
+        }
+
+        let any_ip = entry.ip_addresses.first()?;
+        Some(format!("ws://{any_ip}:{}", entry.clients_ws_port))
+    }
+
+    pub fn ws_entry_address(&self, prefer_ipv6: bool) -> Option<String> {
+        if let Some(tls) = self.ws_entry_address_tls() {
+            return Some(tls);
+        }
+        self.ws_entry_address_no_tls(prefer_ipv6)
+    }
+
+    pub fn ws_entry_address_with_fallback(
+        &self,
+        prefer_ipv6: bool,
+        no_hostname: bool,
+    ) -> (Option<String>, Option<String>) {
+        let Some(entry) = &self.entry else {
+            return (None, None);
+        };
+
+        // Put hostname first if we want it
+        let maybe_hostname = if !no_hostname {
+            entry.hostname.clone()
+        } else {
+            None
+        };
+
+        // Put ipv6 first or keep them as is
+        let ips: Vec<&IpAddr> = if prefer_ipv6 {
+            entry
+                .ip_addresses
+                .iter()
+                .filter(|ip| ip.is_ipv6())
+                .chain(entry.ip_addresses.iter().filter(|ip| ip.is_ipv4()))
+                .collect()
+        } else {
+            entry.ip_addresses.iter().collect()
+        };
+
+        // chain everything and keep the top two as ws addresses
+        let ws_addresses: Vec<_> = maybe_hostname
+            .into_iter()
+            .chain(ips.into_iter().map(|ip| ip.to_string()))
+            .take(2)
+            .map(|host| format!("ws://{host}:{}", entry.clients_ws_port))
+            .collect();
+
+        (ws_addresses.first().cloned(), ws_addresses.get(1).cloned())
+    }
+
+    pub fn identity(&self) -> ed25519::PublicKey {
+        self.identity_key
+    }
+}
+
+impl<'a> From<&'a RoutingNode> for SphinxNode {
+    fn from(node: &'a RoutingNode) -> Self {
+        // SAFETY: this conversion is infallible as all versions of socket addresses have
+        // sufficiently small bytes representation to fit inside `NodeAddressBytes`
+        #[allow(clippy::unwrap_used)]
+        let node_address_bytes = NymNodeRoutingAddress::from(node.mix_host)
+            .try_into()
+            .unwrap();
+
+        SphinxNode::new(node_address_bytes, node.sphinx_key.into())
+    }
+}
+
+impl<'a> TryFrom<&'a SkimmedNodeV1> for RoutingNode {
+    type Error = RoutingNodeError;
+
+    fn try_from(value: &'a SkimmedNodeV1) -> Result<Self, Self::Error> {
+        // IF YOU EVER ADD "performance" TO RoutingNode,
+        // MAKE SURE TO UPDATE THE LAZY IMPLEMENTATION OF
+        // `impl NodeDescriptionTopologyExt for NymNodeDescription`!!!
+
+        let Some(first_ip) = value.ip_addresses.first() else {
+            return Err(RoutingNodeError::NoIpAddressesProvided {
+                node_id: value.node_id,
+                identity: value.ed25519_identity_pubkey.to_string(),
+            });
+        };
+
+        let entry = value.entry.as_ref().map(|entry| EntryDetails {
+            ip_addresses: value.ip_addresses.clone(),
+            clients_ws_port: entry.ws_port,
+            hostname: entry.hostname.clone(),
+            clients_wss_port: entry.wss_port,
+        });
+
+        Ok(RoutingNode {
+            node_id: value.node_id,
+            mix_host: SocketAddr::new(*first_ip, value.mix_port),
+            entry,
+            identity_key: value.ed25519_identity_pubkey,
+            sphinx_key: value.x25519_sphinx_pubkey,
+            supported_roles: value.supported_roles.into(),
+        })
+    }
+}

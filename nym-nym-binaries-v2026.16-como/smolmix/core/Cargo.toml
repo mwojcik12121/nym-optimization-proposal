@@ -1,0 +1,37 @@
+[package]
+name = "nym-smolmix"
+description = "Tunnel for TCP and UDP traffic to be sent over Nym mixnet to clearnet remote hosts"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme = "src/ARCHITECTURE.md"
+publish = true
+
+[dependencies]
+nym-smol-core = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+nym-sdk = { workspace = true }
+nym-ip-packet-requests = { workspace = true, default-features = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time", "net"] }
+tokio-tungstenite.workspace = true
+webpki-roots.workspace = true
+rustls = { workspace = true, features = ["std", "ring"] }
+tokio-rustls = { workspace = true }
+nym-bin-common = { workspace = true, features = ["basic_tracing"] }
+hickory-resolver = { workspace = true, features = ["tokio", "system-config"] }
+hickory-proto = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+http-body-util = { workspace = true }
+reqwest = { workspace = true, features = ["rustls"] }

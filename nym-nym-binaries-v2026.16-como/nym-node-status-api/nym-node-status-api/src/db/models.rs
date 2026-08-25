@@ -1,0 +1,841 @@
+use crate::{
+    http::{self, models::SummaryHistory},
+    utils::{NumericalCheckedCast, decimal_to_i64, unix_timestamp_to_utc_rfc3339},
+};
+use anyhow::Context;
+use nym_contracts_common::Percent;
+use nym_crypto::asymmetric::ed25519::serde_helpers::bs58_ed25519_pubkey;
+use nym_crypto::asymmetric::x25519::serde_helpers::bs58_x25519_pubkey;
+use nym_crypto::asymmetric::{ed25519, x25519};
+use nym_network_defaults::DEFAULT_NYM_NODE_HTTP_PORT;
+use nym_node_requests::api::v1::node::models::NodeDescription;
+use nym_validator_client::{client::NymNodeDetails, nym_api::SkimmedNodeV1};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use std::net::IpAddr;
+use std::str::FromStr;
+use strum_macros::{EnumString, FromRepr};
+use time::{Date, OffsetDateTime, UtcDateTime};
+use utoipa::ToSchema;
+
+fn build_ports_check_summary_json(
+    can_register: bool,
+    port_check_target: Option<String>,
+    ports: Option<&serde_json::Map<String, serde_json::Value>>,
+    error: Option<String>,
+) -> serde_json::Value {
+    let failed_ports = ports
+        .map(|ports| {
+            ports
+                .iter()
+                .filter_map(|(port, open)| open.as_bool().filter(|is_open| !is_open).map(|_| port))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let has_ports = ports.is_some_and(|p| !p.is_empty());
+    let all_pass = can_register && failed_ports.is_empty() && has_ports;
+
+    serde_json::json!({
+        "all_pass": all_pass,
+        "error": error,
+        "port_check_target": port_check_target,
+        "failed_ports": failed_ports,
+    })
+}
+
+pub(crate) fn ports_check_summary_json_from_result(
+    result: &nym_gateway_probe::PortCheckResult,
+) -> serde_json::Value {
+    let ports = result
+        .ports
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::Bool(*v)))
+        .collect::<serde_json::Map<_, _>>();
+
+    build_ports_check_summary_json(
+        result.can_register,
+        Some(result.port_check_target.clone()),
+        Some(&ports),
+        result.error.clone(),
+    )
+}
+
+pub(crate) fn normalize_ports_check_payload(value: serde_json::Value) -> Option<serde_json::Value> {
+    let serde_json::Value::Object(map) = value else {
+        return None;
+    };
+
+    // New shape is already in place; pass through untouched.
+    if map.contains_key("all_pass")
+        && map.contains_key("error")
+        && map.contains_key("port_check_target")
+        && map.contains_key("failed_ports")
+    {
+        return Some(serde_json::Value::Object(map));
+    }
+
+    // Legacy dedicated shape: { gateway, can_register, port_check_target, ports, error }
+    if map.contains_key("can_register") && map.contains_key("ports") {
+        let can_register = map
+            .get("can_register")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let port_check_target = map
+            .get("port_check_target")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned);
+        let ports = map.get("ports").and_then(serde_json::Value::as_object);
+        let error = map
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned);
+
+        return Some(build_ports_check_summary_json(
+            can_register,
+            port_check_target,
+            ports,
+            error,
+        ));
+    }
+
+    if map.contains_key("all_pass") && map.contains_key("failed_ports") {
+        let mut normalized = map;
+        normalized.remove("ports_tested");
+        normalized
+            .entry("port_check_target".to_string())
+            .or_insert(serde_json::Value::Null);
+        normalized
+            .entry("error".to_string())
+            .or_insert(serde_json::Value::Null);
+        return Some(serde_json::Value::Object(normalized));
+    }
+
+    Some(serde_json::Value::Object(map))
+}
+
+macro_rules! serialize_opt_to_value {
+    ($var:expr) => {{
+        match $var {
+            None => Ok(None),
+            Some(ref value) => serde_json::to_value(value).map(Some).map_err(|err| {
+                anyhow::anyhow!("Failed to serialize {}: {:?}", stringify!($var), err)
+            }),
+        }
+    }};
+}
+
+pub(crate) struct GatewayInsertRecord {
+    pub(crate) identity_key: String,
+    pub(crate) bonded: bool,
+    pub(crate) self_described: String,
+    // TODO dz shouldn't be an option
+    pub(crate) explorer_pretty_bond: Option<String>,
+    pub(crate) last_updated_utc: i64,
+    pub(crate) performance: u8,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(crate) struct GatewayDto {
+    pub(crate) gateway_identity_key: String,
+    pub(crate) bonded: bool,
+    pub(crate) performance: i32,
+    pub(crate) self_described: Option<String>,
+    pub(crate) explorer_pretty_bond: Option<String>,
+    pub(crate) last_probe_result: Option<String>,
+    pub(crate) last_probe_log: Option<String>,
+    pub(crate) ports_check: Option<serde_json::Value>,
+    pub(crate) last_ports_check_utc: Option<i64>,
+    pub(crate) last_testrun_utc: Option<i64>,
+    pub(crate) last_updated_utc: i64,
+    pub(crate) moniker: String,
+    pub(crate) security_contact: String,
+    pub(crate) details: String,
+    pub(crate) website: String,
+    pub(crate) bridges: Option<serde_json::Value>,
+}
+
+impl TryFrom<GatewayDto> for http::models::Gateway {
+    type Error = anyhow::Error;
+
+    fn try_from(value: GatewayDto) -> Result<Self, Self::Error> {
+        // Instead of using routing_score_successes / routing_score_samples, we use the
+        // number of successful testruns in the last 24h.
+        let routing_score = 0f32;
+        let config_score = 0u32;
+        let last_updated_utc = unix_timestamp_to_utc_rfc3339(value.last_updated_utc);
+        let last_testrun_utc = value.last_testrun_utc.map(unix_timestamp_to_utc_rfc3339);
+
+        let self_described = value.self_described.clone().unwrap_or("null".to_string());
+        let explorer_pretty_bond = value
+            .explorer_pretty_bond
+            .clone()
+            .unwrap_or("null".to_string());
+        let last_probe_result_raw = value
+            .last_probe_result
+            .clone()
+            .unwrap_or("null".to_string());
+        let last_probe_log = value.last_probe_log.clone();
+
+        let self_described = serde_json::from_str(&self_described).unwrap_or(None);
+        let explorer_pretty_bond = serde_json::from_str(&explorer_pretty_bond).unwrap_or(None);
+        let last_probe_result = serde_json::from_str::<serde_json::Value>(&last_probe_result_raw)
+            .ok()
+            .and_then(|v| (!v.is_null()).then_some(v));
+
+        let ports_check = value
+            .ports_check
+            .clone()
+            .filter(|v| !v.is_null())
+            .and_then(normalize_ports_check_payload);
+        let last_ports_check_utc = value
+            .last_ports_check_utc
+            .map(unix_timestamp_to_utc_rfc3339);
+
+        let bonded = value.bonded;
+        let performance = value.performance as u8;
+
+        let description = NodeDescription {
+            moniker: value.moniker.clone(),
+            website: value.website.clone(),
+            security_contact: value.security_contact.clone(),
+            details: value.details.clone(),
+        };
+
+        let bridges = value.bridges.clone();
+
+        Ok(http::models::Gateway {
+            gateway_identity_key: value.gateway_identity_key.clone(),
+            bonded,
+            performance,
+            self_described,
+            explorer_pretty_bond,
+            description,
+            last_probe_result,
+            last_probe_log,
+            ports_check,
+            last_ports_check_utc,
+            routing_score,
+            config_score,
+            last_testrun_utc,
+            last_updated_utc,
+            bridges,
+        })
+    }
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(crate) struct MixnodeDto {
+    pub(crate) mix_id: i64,
+    pub(crate) bonded: bool,
+    pub(crate) is_dp_delegatee: bool,
+    pub(crate) total_stake: i64,
+    pub(crate) full_details: String,
+    pub(crate) self_described: Option<String>,
+    pub(crate) last_updated_utc: i64,
+    pub(crate) moniker: String,
+    pub(crate) website: String,
+    pub(crate) security_contact: String,
+    pub(crate) details: String,
+}
+
+impl TryFrom<MixnodeDto> for http::models::Mixnode {
+    type Error = anyhow::Error;
+
+    fn try_from(value: MixnodeDto) -> Result<Self, Self::Error> {
+        let mix_id = value.mix_id.cast_checked()?;
+        let full_details = value.full_details.clone();
+        let full_details = serde_json::from_str(&full_details).unwrap_or(None);
+
+        let self_described = value
+            .self_described
+            .clone()
+            .map(|v| serde_json::from_str(&v).unwrap_or(serde_json::Value::Null));
+
+        let last_updated_utc = unix_timestamp_to_utc_rfc3339(value.last_updated_utc);
+        let is_dp_delegatee = value.is_dp_delegatee;
+        let moniker = value.moniker.clone();
+        let website = value.website.clone();
+        let security_contact = value.security_contact.clone();
+        let details = value.details.clone();
+
+        Ok(http::models::Mixnode {
+            mix_id,
+            bonded: value.bonded,
+            is_dp_delegatee,
+            total_stake: value.total_stake,
+            full_details,
+            description: NodeDescription {
+                moniker,
+                website,
+                security_contact,
+                details,
+            },
+            self_described,
+            last_updated_utc,
+        })
+    }
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone)]
+pub(crate) struct BondedStatusDto {
+    pub(crate) id: i64,
+    pub(crate) identity_key: String,
+    pub(crate) bonded: bool,
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Default, FromRow)]
+pub(crate) struct SummaryDto {
+    pub(crate) key: String,
+    pub(crate) value_json: String,
+    pub(crate) last_updated_utc: i64,
+}
+
+#[derive(Debug, Clone, Default, FromRow)]
+pub(crate) struct SummaryHistoryDto {
+    #[allow(dead_code)]
+    pub id: i64,
+    pub date: String,
+    pub value_json: String,
+    pub timestamp_utc: i64,
+}
+
+impl TryFrom<SummaryHistoryDto> for SummaryHistory {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SummaryHistoryDto) -> Result<Self, Self::Error> {
+        let value_json = serde_json::from_str(&value.value_json).unwrap_or_default();
+        Ok(SummaryHistory {
+            value_json,
+            date: value.date.clone(),
+            timestamp_utc: unix_timestamp_to_utc_rfc3339(value.timestamp_utc),
+        })
+    }
+}
+
+pub(crate) const NYMNODES_DESCRIBED_COUNT: &str = "nymnode.described.count";
+
+pub(crate) const NYMNODE_COUNT: &str = "nymnode.total.count";
+pub(crate) const ASSIGNED_ENTRY_COUNT: &str = "assigned.entry.count";
+pub(crate) const ASSIGNED_EXIT_COUNT: &str = "assigned.exit.count";
+pub(crate) const ASSIGNED_MIXING_COUNT: &str = "assigned.mixing.count";
+
+pub(crate) const GATEWAYS_BONDED_COUNT: &str = "gateways.bonded.count";
+
+pub(crate) const MIXNODES_HISTORICAL_COUNT: &str = "mixnodes.historical.count";
+pub(crate) const GATEWAYS_HISTORICAL_COUNT: &str = "gateways.historical.count";
+
+// `utoipa` goes crazy if you use module-qualified prefix as field type so we
+//  have to import it
+use crate::node_scraper::models::BridgeInformation;
+use gateway::GatewaySummary;
+use mixnode::MixnodeSummary;
+use nym_api_requests::models::described::type_translation::{
+    LewesProtocolDetailsV1, SphinxKeyV1, WebSocketsV1,
+};
+use nym_api_requests::models::described::v2::{
+    AuthenticatorDetailsV2, DeclaredRolesV2, DescribedNodeTypeV2, HostInformationV2, HostKeysV2,
+    IpPacketRouterDetailsV2, NetworkRequesterDetailsV2, NymNodeAuxiliaryDetailsV2, NymNodeDataV2,
+    NymNodeDescriptionV2, WireguardDetailsV2,
+};
+use nym_bin_common::build_information::BinaryBuildInformationOwned;
+use nym_mixnet_contract_common::NodeId;
+use nym_validator_client::models::{OffsetDateTimeJsonSchemaWrapper, VersionedNoiseKeyV1};
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub(crate) struct NetworkSummary {
+    pub(crate) total_nodes: i32,
+    pub(crate) mixnodes: MixnodeSummary,
+    pub(crate) gateways: GatewaySummary,
+}
+
+pub(crate) mod mixnode {
+    use super::*;
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct MixnodeSummary {
+        pub(crate) bonded: MixingNodesSummary,
+        pub(crate) historical: MixnodeSummaryHistorical,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct MixingNodesSummary {
+        pub(crate) count: i32,
+        pub(crate) self_described: i32,
+        pub(crate) last_updated_utc: String,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct MixnodeSummaryHistorical {
+        pub(crate) count: i32,
+        pub(crate) last_updated_utc: String,
+    }
+}
+
+pub(crate) mod gateway {
+    use super::*;
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct GatewaySummary {
+        pub(crate) bonded: GatewaySummaryBonded,
+
+        pub(crate) historical: GatewaySummaryHistorical,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct GatewaySummaryBonded {
+        pub(crate) count: i32,
+        pub(crate) entry: i32,
+        pub(crate) exit: i32,
+        pub(crate) last_updated_utc: String,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+    pub(crate) struct GatewaySummaryHistorical {
+        pub(crate) count: i32,
+        pub(crate) last_updated_utc: String,
+    }
+}
+
+#[allow(dead_code)] // not dead code, this is SQL data model
+#[derive(Debug, Clone, FromRow)]
+pub struct TestRunDto {
+    pub id: i32,
+    pub gateway_id: i32,
+    pub status: i32,
+    pub kind: i16,
+    pub created_utc: i64,
+    pub ip_address: String,
+    pub log: String,
+    pub last_assigned_utc: Option<i64>,
+}
+
+#[derive(Debug, Clone, strum_macros::Display, EnumString, FromRepr, PartialEq)]
+#[repr(u8)]
+pub(crate) enum TestRunStatus {
+    Complete = 2,
+    InProgress = 1,
+    Queued = 0,
+}
+
+#[derive(Debug, Clone, Copy, strum_macros::Display, EnumString, FromRepr, PartialEq, Eq)]
+#[repr(i16)]
+pub(crate) enum TestRunKind {
+    Probe = 0,
+    PortsCheck = 1,
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayIdentityDto {
+    pub gateway_identity_key: String,
+    pub bonded: bool,
+}
+
+#[allow(dead_code)] // it's not dead code but clippy doesn't detect usage in sqlx macros
+#[derive(Debug, Clone, FromRow)]
+pub struct GatewayInfoDto {
+    pub id: i32,
+    pub gateway_identity_key: String,
+    pub self_described: Option<String>,
+    pub explorer_pretty_bond: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct GatewaySessionsRecord {
+    pub gateway_identity_key: String,
+    pub node_id: i64,
+    pub day: Date,
+    pub unique_active_clients: i64,
+    pub session_started: i64,
+    pub users_hashes: Option<String>,
+    pub vpn_sessions: Option<String>,
+    pub mixnet_sessions: Option<String>,
+    pub unknown_sessions: Option<String>,
+}
+
+impl TryFrom<GatewaySessionsRecord> for http::models::SessionStats {
+    type Error = anyhow::Error;
+
+    fn try_from(value: GatewaySessionsRecord) -> Result<Self, Self::Error> {
+        let users_hashes = value.users_hashes.clone().unwrap_or("null".to_string());
+        let vpn_sessions = value.vpn_sessions.clone().unwrap_or("null".to_string());
+        let mixnet_sessions = value.mixnet_sessions.clone().unwrap_or("null".to_string());
+        let unknown_sessions = value.unknown_sessions.clone().unwrap_or("null".to_string());
+
+        let users_hashes = serde_json::from_str(&users_hashes).unwrap_or(None);
+        let vpn_sessions = serde_json::from_str(&vpn_sessions).unwrap_or(None);
+        let mixnet_sessions = serde_json::from_str(&mixnet_sessions).unwrap_or(None);
+        let unknown_sessions = serde_json::from_str(&unknown_sessions).unwrap_or(None);
+
+        Ok(http::models::SessionStats {
+            gateway_identity_key: value.gateway_identity_key.clone(),
+            node_id: value.node_id as u32,
+            day: value.day,
+            unique_active_clients: value.unique_active_clients,
+            session_started: value.session_started,
+            users_hashes,
+            vpn_sessions,
+            mixnet_sessions,
+            unknown_sessions,
+        })
+    }
+}
+
+#[derive(strum_macros::Display, Clone)]
+pub(crate) enum ScrapeNodeKind {
+    MixingNymNode { node_id: i64 },
+    EntryExitNymNode { node_id: i64, identity_key: String },
+}
+
+impl ScrapeNodeKind {
+    pub(crate) fn node_id(&self) -> &i64 {
+        match self {
+            ScrapeNodeKind::MixingNymNode { node_id } => node_id,
+            ScrapeNodeKind::EntryExitNymNode { node_id, .. } => node_id,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ScraperNodeInfo {
+    pub node_kind: ScrapeNodeKind,
+    pub hosts: Vec<String>,
+    pub http_api_port: Option<u16>,
+}
+
+impl ScraperNodeInfo {
+    pub(crate) fn contact_addresses(&self) -> Vec<String> {
+        let mut urls = Vec::new();
+        for host in &self.hosts {
+            urls.append(&mut vec![
+                format!("http://{}:{}", host, DEFAULT_NYM_NODE_HTTP_PORT),
+                format!("http://{}:8000", host),
+                format!("https://{}", host),
+                format!("http://{}", host),
+            ]);
+
+            if let Some(custom_http_api_port) = self.http_api_port {
+                urls = Vec::new();
+                for host in &self.hosts {
+                    urls.append(&mut vec![format!(
+                        "http://{}:{}",
+                        host, custom_http_api_port
+                    )]);
+                }
+
+                // do not fall back to default ports, if the operator sets a custom http api port
+                // in their bond, use it and error out if it's not available
+                // this will correctly handle cases where some operators run multiple nodes
+                // on a single IP address and assign different custom http port apis at bond time
+
+                // urls.insert(0, format!("http://{}:{}", host, custom_http_api_port));
+            }
+        }
+
+        urls
+    }
+
+    pub(crate) fn node_id(&self) -> &i64 {
+        self.node_kind.node_id()
+    }
+}
+
+#[allow(dead_code)] // it's not dead code but clippy doesn't detect usage in sqlx macros
+#[derive(FromRow, Debug)]
+pub(crate) struct NymNodeDto {
+    pub node_id: i32,
+    pub ed25519_identity_pubkey: String,
+    pub total_stake: i64,
+    pub ip_addresses: serde_json::Value,
+    pub mix_port: i32,
+    pub x25519_sphinx_pubkey: String,
+    pub node_role: serde_json::Value,
+    pub supported_roles: serde_json::Value,
+    pub entry: Option<serde_json::Value>,
+    pub performance: String,
+    pub self_described: Option<serde_json::Value>,
+    pub bond_info: Option<serde_json::Value>,
+    pub http_api_port: Option<i32>,
+}
+
+// it's not dead code but clippy doesn't detect usage in sqlx macros
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct NymNodeInsertRecord {
+    pub node_id: i32,
+    pub ed25519_identity_pubkey: String,
+    pub total_stake: i64,
+    pub ip_addresses: serde_json::Value,
+    pub mix_port: i32,
+    pub x25519_sphinx_pubkey: String,
+    pub node_role: serde_json::Value,
+    pub supported_roles: serde_json::Value,
+    pub performance: String,
+    pub entry: Option<serde_json::Value>,
+    pub self_described: Option<serde_json::Value>,
+    pub bond_info: Option<serde_json::Value>,
+    pub http_api_port: Option<i32>,
+    pub last_updated_utc: i64,
+}
+
+impl NymNodeInsertRecord {
+    pub fn new(
+        skimmed_node: SkimmedNodeV1,
+        bond_info: Option<&NymNodeDetails>,
+        self_described: Option<&NymNodeDescriptionV2>,
+    ) -> anyhow::Result<Self> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+
+        // if bond info is missing, set stake to 0
+        let total_stake = bond_info
+            .map(|info| decimal_to_i64(info.total_stake()))
+            .unwrap_or(0);
+        let entry = serialize_opt_to_value!(skimmed_node.entry)?;
+        let http_api_port = bond_info.and_then(|bond| {
+            bond.bond_information
+                .node
+                .custom_http_port
+                .map(|port| port as i32)
+        });
+        let bond_info = serialize_opt_to_value!(bond_info)?;
+        let self_described = serialize_opt_to_value!(self_described)?;
+
+        let record = Self {
+            node_id: skimmed_node.node_id as i32,
+            ed25519_identity_pubkey: skimmed_node.ed25519_identity_pubkey.to_base58_string(),
+            total_stake,
+            ip_addresses: serde_json::to_value(&skimmed_node.ip_addresses)?,
+            mix_port: skimmed_node.mix_port as i32,
+            x25519_sphinx_pubkey: skimmed_node.x25519_sphinx_pubkey.to_base58_string(),
+            node_role: serde_json::to_value(&skimmed_node.role)?,
+            supported_roles: serde_json::to_value(skimmed_node.supported_roles)?,
+            performance: skimmed_node.performance.value().to_string(),
+            entry,
+            self_described,
+            bond_info,
+            http_api_port,
+            last_updated_utc: now,
+        };
+
+        Ok(record)
+    }
+}
+
+impl TryFrom<NymNodeDto> for SkimmedNodeV1 {
+    type Error = anyhow::Error;
+
+    fn try_from(other: NymNodeDto) -> Result<Self, Self::Error> {
+        let node_id = u32::try_from(other.node_id).context("Invalid node_id in DB")?;
+        let supported_roles =
+            serde_json::from_value(other.supported_roles).context("supported_roles")?;
+        let node_role = serde_json::from_value(other.node_role).context("node_role")?;
+        let ip_addresses = serde_json::from_value(other.ip_addresses).context("ip_addresses")?;
+        let entry = match other.entry {
+            Some(raw) => Some(serde_json::from_value(raw).context("entry")?),
+            None => None,
+        };
+
+        let skimmed_node = SkimmedNodeV1 {
+            node_id,
+            ed25519_identity_pubkey: ed25519::PublicKey::from_base58_string(
+                other.ed25519_identity_pubkey,
+            )
+            .context("ed25519_identity_pubkey")?,
+            ip_addresses,
+            mix_port: other.mix_port.try_into()?,
+            x25519_sphinx_pubkey: x25519::PublicKey::from_base58_string(other.x25519_sphinx_pubkey)
+                .context("x25519_sphinx_pubkey")?,
+            role: node_role,
+            supported_roles,
+            entry,
+            performance: Percent::from_str(&other.performance).context("can't parse Percent")?,
+        };
+
+        Ok(skimmed_node)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::Decode, FromRow)]
+pub struct NodeStats {
+    pub packets_received: i32,
+    pub packets_sent: i32,
+    pub packets_dropped: i32,
+}
+
+pub struct InsertNodeScraperRecords {
+    pub node_kind: ScrapeNodeKind,
+    pub timestamp_utc: UtcDateTime,
+    pub unix_timestamp: i64,
+    pub stats: NodeStats,
+    pub bridges: Option<BridgeInformation>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct NymNodeDescriptionDeHelper {
+    pub node_id: NodeId,
+    pub contract_node_type: DescribedNodeTypeV2,
+    pub description: NymNodeDataDeHelper,
+}
+
+#[allow(deprecated)]
+impl From<NymNodeDescriptionDeHelper> for NymNodeDescriptionV2 {
+    fn from(helper: NymNodeDescriptionDeHelper) -> Self {
+        let current_x25519_sphinx_key = helper
+            .description
+            .host_information
+            .keys
+            .current_x25519_sphinx_key
+            .unwrap_or(SphinxKeyV1 {
+                // indicate the legacy case
+                rotation_id: u32::MAX,
+                public_key: helper.description.host_information.keys.x25519,
+            });
+
+        NymNodeDescriptionV2 {
+            node_id: helper.node_id,
+            contract_node_type: helper.contract_node_type,
+            description: NymNodeDataV2 {
+                last_polled: helper.description.last_polled,
+                host_information: HostInformationV2 {
+                    ip_address: helper.description.host_information.ip_address,
+                    hostname: helper.description.host_information.hostname,
+                    keys: HostKeysV2 {
+                        ed25519: helper.description.host_information.keys.ed25519,
+                        x25519: helper.description.host_information.keys.x25519,
+                        current_x25519_sphinx_key,
+                        pre_announced_x25519_sphinx_key: helper
+                            .description
+                            .host_information
+                            .keys
+                            .pre_announced_x25519_sphinx_key,
+                        x25519_versioned_noise: helper
+                            .description
+                            .host_information
+                            .keys
+                            .x25519_versioned_noise,
+                    },
+                },
+                declared_role: helper.description.declared_role,
+                auxiliary_details: helper.description.auxiliary_details,
+                build_information: helper.description.build_information,
+                network_requester: helper.description.network_requester,
+                ip_packet_router: helper.description.ip_packet_router,
+                authenticator: helper.description.authenticator,
+                wireguard: helper.description.wireguard,
+                lewes_protocol: helper.description.lewes_protocol,
+                mixnet_websockets: helper.description.mixnet_websockets,
+            },
+        }
+    }
+}
+
+// in this instance, since data is stored as json
+// adding a new field with #[serde(default)] is fine
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct NymNodeDataDeHelper {
+    #[serde(default)]
+    pub last_polled: OffsetDateTimeJsonSchemaWrapper,
+
+    pub host_information: HostInformationDeHelper,
+
+    #[serde(default)]
+    pub declared_role: DeclaredRolesV2,
+
+    #[serde(default)]
+    pub auxiliary_details: NymNodeAuxiliaryDetailsV2,
+
+    // TODO: do we really care about ALL build info or just the version?
+    pub build_information: BinaryBuildInformationOwned,
+
+    #[serde(default)]
+    pub network_requester: Option<NetworkRequesterDetailsV2>,
+
+    #[serde(default)]
+    pub ip_packet_router: Option<IpPacketRouterDetailsV2>,
+
+    #[serde(default)]
+    pub authenticator: Option<AuthenticatorDetailsV2>,
+
+    #[serde(default)]
+    pub wireguard: Option<WireguardDetailsV2>,
+
+    #[serde(default)]
+    pub lewes_protocol: Option<LewesProtocolDetailsV1>,
+
+    // for now we only care about their ws/wss situation, nothing more
+    pub mixnet_websockets: WebSocketsV1,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct HostInformationDeHelper {
+    pub ip_address: Vec<IpAddr>,
+    pub hostname: Option<String>,
+    pub keys: HostKeysDeHelper,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct HostKeysDeHelper {
+    #[serde(with = "bs58_ed25519_pubkey")]
+    pub ed25519: ed25519::PublicKey,
+
+    #[deprecated(note = "use the current_x25519_sphinx_key with explicit rotation information")]
+    #[serde(with = "bs58_x25519_pubkey")]
+    pub x25519: x25519::PublicKey,
+
+    // legacy data will NOT have this information
+    pub current_x25519_sphinx_key: Option<SphinxKeyV1>,
+
+    #[serde(default)]
+    pub pre_announced_x25519_sphinx_key: Option<SphinxKeyV1>,
+
+    #[serde(default)]
+    pub x25519_versioned_noise: Option<VersionedNoiseKeyV1>,
+}
+
+// ---- node families ----
+
+// it's not dead code but clippy doesn't detect usage in sqlx macros
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct NodeFamilyInsertRecord {
+    pub family_id: i64,
+    pub name: String,
+    pub description: String,
+    pub owner: String,
+    pub family_stake_unym: Option<i64>,
+    /// Member count as reported by nym-api; stored denormalised so callers
+    /// don't have to aggregate over `node_family_members`.
+    pub members_count: i32,
+    pub created_at: i64,
+    pub last_updated_utc: i64,
+    pub members: Vec<NodeFamilyMemberInsertRecord>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct NodeFamilyMemberInsertRecord {
+    pub node_id: i64,
+    pub joined_at: i64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, FromRow)]
+pub(crate) struct NodeFamilyDto {
+    pub family_id: i64,
+    pub name: String,
+    pub description: String,
+    pub owner: String,
+    pub family_stake_unym: Option<i64>,
+    pub members_count: i32,
+    pub created_at: i64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, FromRow)]
+pub(crate) struct NodeFamilyMemberDto {
+    pub node_id: i64,
+    pub family_id: i64,
+}

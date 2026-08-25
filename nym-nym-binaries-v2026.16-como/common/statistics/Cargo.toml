@@ -1,0 +1,47 @@
+# Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "nym-statistics-common"
+description = "This crate contains basic statistics utilities and abstractions to be re-used and applied throughout both the client and gateway implementations"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = { workspace = true }
+log = { workspace = true }
+sysinfo = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true }
+si-scale = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+
+nym-crypto = { workspace = true }
+nym-sphinx = { workspace = true }
+nym-credentials-interface = { workspace = true }
+nym-metrics = { workspace = true }
+nym-task = { workspace = true }
+
+utoipa = { workspace = true, optional = true }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies.wasmtimer]
+workspace = true
+
+[features]
+default = []
+openapi = ["dep:utoipa"]

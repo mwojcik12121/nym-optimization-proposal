@@ -1,0 +1,5 @@
+{
+  "bundling": "General",
+  "esbuild": "ESBuild",
+  "webpack": "Webpack"
+}

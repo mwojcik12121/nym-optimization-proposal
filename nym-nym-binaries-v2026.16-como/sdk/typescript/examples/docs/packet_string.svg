@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="893px" height="121px" viewBox="0 0 893 121" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>packet_format</title>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="A4" transform="translate(-18.000000, -340.000000)" fill-rule="nonzero">
+            <g id="packet_format" transform="translate(19.000000, 341.000000)">
+                <g id="Group" transform="translate(0.198697, 0.000000)">
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="0" y="0" width="891" height="118.849077"></rect>
+                    <g transform="translate(10.199783, 5.856678)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="UTF-8-string-payload">
+                        <g transform="translate(0.601520, 0.143322)">
+                            <text>
+                                <tspan x="0" y="11">UTF-8 string payload</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="9.77777778" y="27.6923077" width="366" height="36.9230769"></rect>
+                    <g transform="translate(59.483333, 39.230769)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="51-(as-unsigned-64-b">
+                        <g transform="translate(0.317970, 0.769231)">
+                            <text>
+                                <tspan x="0" y="11">51 (as unsigned 64 bit integer big endian)</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="385.666667" y="27.6923077" width="494.444444" height="36.9230769"></rect>
+                    <g transform="translate(551.694444, 39.230769)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="{-“mime-type”:-“text">
+                        <g transform="translate(0.106858, 0.769231)">
+                            <text>
+                                <tspan x="0" y="11">{ “mime-type”: “text/plain” }</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="9.88888889" y="73.8461538" width="870.222222" height="36.9230769"></rect>
+                    <g transform="translate(365.694444, 84.384615)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="text-data-encoded-as">
+                        <g>
+                            <text>
+                                <tspan x="0.106858487" y="11.6153846">text data encoded as UTF-8</tspan>
+                            </text>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

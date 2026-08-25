@@ -1,0 +1,32 @@
+[package]
+name = "nym-socks5-proxy-helpers"
+description = "Helpers for the Nym SOCKS client"
+version.workspace = true
+authors = ["Jedrzej Stuczynski <andrew@nymtech.net>"]
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = { workspace = true }
+tokio = { workspace = true, features = [ "net", "io-util", "sync", "macros", "time", "rt-multi-thread" ] }
+tokio-util = { workspace = true, features = [ "io" ] } # reason for getting this guy is to to able to port to tokio 1.X more quickly by being able to use
+# their `read_buf` [from the util crate] replacement rather than having to rethink/reimplement `AvailableReader` with the new AsyncRead trait definition.
+# In the long run, the dependency should probably get removed in favour of pure-tokio implementation, but for time being it's fine.
+futures = { workspace = true }
+log = { workspace = true }
+
+# internal
+nym-ordered-buffer = { workspace = true }
+nym-socks5-requests = { workspace = true }
+nym-task = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }

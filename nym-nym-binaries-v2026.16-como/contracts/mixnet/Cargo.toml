@@ -1,0 +1,66 @@
+[package]
+name = "nym-mixnet-contract"
+description = "Nym mixnet contract"
+version = "1.5.1"
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+readme = "README.md"
+publish = false
+exclude = [
+    # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+    "contract.wasm",
+    "hash.txt",
+    "artifacts",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "schema"
+required-features = ["schema-gen"]
+
+[lib]
+name = "mixnet_contract"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mixnet-contract-common = { workspace = true }
+vesting-contract-common = { workspace = true }
+nym-node-families-contract-common = { workspace = true }
+nym-contracts-common = { workspace = true }
+nym-contracts-common-testing = { workspace = true, optional = true }
+
+cosmwasm-schema = { workspace = true, optional = true }
+cosmwasm-std = { workspace = true }
+cw-controllers = { workspace = true }
+cw2 = { workspace = true }
+cw-storage-plus = { workspace = true }
+
+bs58 = { workspace = true }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+semver = { workspace = true }
+
+nym-crypto = { workspace = true, optional = true }
+
+
+[dev-dependencies]
+anyhow.workspace = true
+rand_chacha = { workspace = true }
+rand = { workspace = true }
+nym-crypto = { workspace = true, features = ["asymmetric", "rand"] }
+easy-addr = { workspace = true }
+
+# activate the `testable-mixnet-contract` in tests (weird workaround, but it does the trick)
+nym-mixnet-contract = { workspace = true, features = ["testable-mixnet-contract"] }
+nym-contracts-common-testing = { workspace = true }
+
+[features]
+default = []
+contract-testing = ["mixnet-contract-common/contract-testing"]
+testable-mixnet-contract = ["nym-contracts-common-testing", "nym-crypto", "nym-crypto/asymmetric", "nym-crypto/rand"]
+schema-gen = ["mixnet-contract-common/schema", "cosmwasm-schema"]
+
+[lints]
+workspace = true

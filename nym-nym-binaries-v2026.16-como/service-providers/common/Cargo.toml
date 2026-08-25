@@ -1,0 +1,31 @@
+[package]
+name = "nym-service-providers-common"
+description = "Common crate for Nym Service Providers"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nym-bin-common = { workspace = true }
+nym-client-core = { workspace = true, features = [
+    "fs-surb-storage",
+    "fs-gateways-storage",
+    "fs-credentials-storage",
+] }
+nym-credential-storage = { workspace = true }
+nym-sphinx-anonymous-replies = { workspace = true }
+
+async-trait = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1133px" height="414px" viewBox="0 0 1133 414" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>sphinx</title>
+    <g id="Page-2" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="A4" transform="translate(-26.000000, -43.000000)" fill-rule="nonzero">
+            <g id="sphinx" transform="translate(27.000000, 44.000000)">
+                <g id="Group" transform="translate(0.229974, 0.000000)">
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="0" y="0" width="1131" height="412"></rect>
+                    <g transform="translate(2.538329, 4.439276)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Encrypted-wrapper-with-gateway-&lt;=&gt;-client-long-term-session-key">
+                        <g>
+                            <text>
+                                <tspan x="0.231696813" y="11.5607235">Encrypted wrapper with gateway &lt;=&gt; client long-term session key</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="19.8245614" y="29.2857143" width="1100.26316" height="370.952381"></rect>
+                    <g transform="translate(23.293860, 36.607143)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Sphinx-Packet">
+                        <g transform="translate(0.476166, 0.392857)">
+                            <text>
+                                <tspan x="0" y="11">Sphinx Packet</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="39.3333333" y="57.2857143" width="1062" height="324.619048"></rect>
+                    <g transform="translate(42.775000, 63.446429)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Mixnode-1-Layer">
+                        <g>
+                            <text>
+                                <tspan x="-0.00497416021" y="11.5535714">Mixnode 1 Layer</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="59" y="85.9285714" width="1032.5" height="286.428571"></rect>
+                    <g transform="translate(62.441667, 92.089286)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Mixnode-2-Layer">
+                        <g>
+                            <text>
+                                <tspan x="0.328359173" y="11.9107143">Mixnode 2 Layer</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="79.65" y="114.571429" width="1002.01667" height="248.238095"></rect>
+                    <g transform="translate(82.091667, 121.732143)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Mixnode-3-Layer">
+                        <g>
+                            <text>
+                                <tspan x="0.678359173" y="11.2678571">Mixnode 3 Layer</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="98.3333333" y="143.214286" width="973.5" height="210.047619"></rect>
+                    <g transform="translate(101.775000, 149.375000)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Egress-Gateway-Layer">
+                        <g>
+                            <text>
+                                <tspan x="-0.00497416021" y="11.625">Egress Gateway Layer</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="118" y="171.857143" width="944" height="171.857143"></rect>
+                    <g transform="translate(121.441667, 178.017857)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="End-to-end-encryption-with-ephemeral-key-(only-known-to-chat-app,-so-gateway-can't-view-payload)">
+                        <g>
+                            <text>
+                                <tspan x="0.328359173" y="11.9821429">End-to-end encryption with ephemeral key (only known to chat app, so gateway can't view payload)</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="137.666667" y="210.047619" width="885" height="124.119048"></rect>
+                    <g transform="translate(141.108333, 216.208333)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="Nym-WASM-client-payl">
+                        <g>
+                            <text>
+                                <tspan x="0.661692506" y="11.7916667">Nym WASM client payload</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="147.333333" y="238.690476" width="364" height="38.1904762"></rect>
+                    <g transform="translate(292.141667, 250.625000)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="header_size...">
+                        <g>
+                            <text>
+                                <tspan x="0" y="11">header_size..</tspan>
+                                <tspan x="0" y="25">.</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="521.166667" y="238.690476" width="491.666667" height="38.1904762"></rect>
+                    <g transform="translate(589.958333, 249.625000)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="{-“mime-type”:-“appl">
+                        <g transform="translate(0.811693, 0.375000)">
+                            <text>
+                                <tspan x="0.954932361" y="11.375">{ “mime-type”: “application/octet-stream”, ... other headers ... }</tspan>
+                            </text>
+                        </g>
+                    </g>
+                    <rect id="Rectangle" stroke="#000000" fill="#FFFFFF" x="147.5" y="286.428571" width="865.333333" height="38.1904762"></rect>
+                    <g transform="translate(562.958333, 298.363095)" fill="#000000" font-family="Helvetica" font-size="12" font-weight="normal" id="data...">
+                        <g>
+                            <text>
+                                <tspan x="0" y="11">data...</tspan>
+                            </text>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

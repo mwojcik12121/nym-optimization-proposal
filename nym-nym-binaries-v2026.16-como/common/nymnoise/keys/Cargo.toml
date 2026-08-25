@@ -1,0 +1,24 @@
+[package]
+name = "nym-noise-keys"
+description = "Helpers and type definition of Nym's Noise protocol keys"
+version.workspace = true
+authors = ["Simon Wicky <simon@nymtech.net>"]
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+schemars = { workspace = true, features = ["preserve_order"] }
+serde = { workspace = true, features = ["derive"] }
+utoipa = { workspace = true }
+
+# internal
+nym-crypto = { workspace = true, features = ["asymmetric", "serde"] }
+
+[lints]
+workspace = true

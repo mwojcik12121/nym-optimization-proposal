@@ -1,0 +1,535 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "get_state"
+      ],
+      "properties": {
+        "get_state": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_current_epoch_state"
+      ],
+      "properties": {
+        "get_current_epoch_state": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_epoch_state_at_height"
+      ],
+      "properties": {
+        "get_epoch_state_at_height": {
+          "type": "object",
+          "required": [
+            "height"
+          ],
+          "properties": {
+            "height": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_current_epoch_threshold"
+      ],
+      "properties": {
+        "get_current_epoch_threshold": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_epoch_threshold"
+      ],
+      "properties": {
+        "get_epoch_threshold": {
+          "type": "object",
+          "required": [
+            "epoch_id"
+          ],
+          "properties": {
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "can_advance_state"
+      ],
+      "properties": {
+        "can_advance_state": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_registered_dealer"
+      ],
+      "properties": {
+        "get_registered_dealer": {
+          "type": "object",
+          "required": [
+            "dealer_address"
+          ],
+          "properties": {
+            "dealer_address": {
+              "type": "string"
+            },
+            "epoch_id": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealer_details"
+      ],
+      "properties": {
+        "get_dealer_details": {
+          "type": "object",
+          "required": [
+            "dealer_address"
+          ],
+          "properties": {
+            "dealer_address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_epoch_dealers_addresses"
+      ],
+      "properties": {
+        "get_epoch_dealers_addresses": {
+          "type": "object",
+          "required": [
+            "epoch_id"
+          ],
+          "properties": {
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_epoch_dealers"
+      ],
+      "properties": {
+        "get_epoch_dealers": {
+          "type": "object",
+          "required": [
+            "epoch_id"
+          ],
+          "properties": {
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_current_dealers"
+      ],
+      "properties": {
+        "get_current_dealers": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealer_indices"
+      ],
+      "properties": {
+        "get_dealer_indices": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealings_metadata"
+      ],
+      "properties": {
+        "get_dealings_metadata": {
+          "type": "object",
+          "required": [
+            "dealer",
+            "dealing_index",
+            "epoch_id"
+          ],
+          "properties": {
+            "dealer": {
+              "type": "string"
+            },
+            "dealing_index": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealer_dealings_status"
+      ],
+      "properties": {
+        "get_dealer_dealings_status": {
+          "type": "object",
+          "required": [
+            "dealer",
+            "epoch_id"
+          ],
+          "properties": {
+            "dealer": {
+              "type": "string"
+            },
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealing_status"
+      ],
+      "properties": {
+        "get_dealing_status": {
+          "type": "object",
+          "required": [
+            "dealer",
+            "dealing_index",
+            "epoch_id"
+          ],
+          "properties": {
+            "dealer": {
+              "type": "string"
+            },
+            "dealing_index": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealing_chunk_status"
+      ],
+      "properties": {
+        "get_dealing_chunk_status": {
+          "type": "object",
+          "required": [
+            "chunk_index",
+            "dealer",
+            "dealing_index",
+            "epoch_id"
+          ],
+          "properties": {
+            "chunk_index": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "dealer": {
+              "type": "string"
+            },
+            "dealing_index": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_dealing_chunk"
+      ],
+      "properties": {
+        "get_dealing_chunk": {
+          "type": "object",
+          "required": [
+            "chunk_index",
+            "dealer",
+            "dealing_index",
+            "epoch_id"
+          ],
+          "properties": {
+            "chunk_index": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "dealer": {
+              "type": "string"
+            },
+            "dealing_index": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_verification_key"
+      ],
+      "properties": {
+        "get_verification_key": {
+          "type": "object",
+          "required": [
+            "epoch_id",
+            "owner"
+          ],
+          "properties": {
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_verification_keys"
+      ],
+      "properties": {
+        "get_verification_keys": {
+          "type": "object",
+          "required": [
+            "epoch_id"
+          ],
+          "properties": {
+            "epoch_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Gets the stored contract version information that's required by the CW2 spec interface for migrations.",
+      "type": "object",
+      "required": [
+        "get_cw2_contract_version"
+      ],
+      "properties": {
+        "get_cw2_contract_version": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

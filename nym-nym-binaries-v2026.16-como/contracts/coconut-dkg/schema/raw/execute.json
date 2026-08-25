@@ -1,0 +1,288 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecuteMsg",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "initiate_dkg"
+      ],
+      "properties": {
+        "initiate_dkg": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "register_dealer"
+      ],
+      "properties": {
+        "register_dealer": {
+          "type": "object",
+          "required": [
+            "announce_address",
+            "bte_key_with_proof",
+            "identity_key",
+            "resharing"
+          ],
+          "properties": {
+            "announce_address": {
+              "type": "string"
+            },
+            "bte_key_with_proof": {
+              "type": "string"
+            },
+            "identity_key": {
+              "type": "string"
+            },
+            "resharing": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "commit_dealings_metadata"
+      ],
+      "properties": {
+        "commit_dealings_metadata": {
+          "type": "object",
+          "required": [
+            "chunks",
+            "dealing_index",
+            "resharing"
+          ],
+          "properties": {
+            "chunks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DealingChunkInfo"
+              }
+            },
+            "dealing_index": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "resharing": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "commit_dealings_chunk"
+      ],
+      "properties": {
+        "commit_dealings_chunk": {
+          "type": "object",
+          "required": [
+            "chunk"
+          ],
+          "properties": {
+            "chunk": {
+              "$ref": "#/definitions/PartialContractDealing"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "commit_verification_key_share"
+      ],
+      "properties": {
+        "commit_verification_key_share": {
+          "type": "object",
+          "required": [
+            "resharing",
+            "share"
+          ],
+          "properties": {
+            "resharing": {
+              "type": "boolean"
+            },
+            "share": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "verify_verification_key_share"
+      ],
+      "properties": {
+        "verify_verification_key_share": {
+          "type": "object",
+          "required": [
+            "owner",
+            "resharing"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "resharing": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "advance_epoch_state"
+      ],
+      "properties": {
+        "advance_epoch_state": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "trigger_reset"
+      ],
+      "properties": {
+        "trigger_reset": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "trigger_resharing"
+      ],
+      "properties": {
+        "trigger_resharing": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Transfers ownership of the epoch dealer to another address. This assumes off-chain hand-over of keys",
+      "type": "object",
+      "required": [
+        "transfer_ownership"
+      ],
+      "properties": {
+        "transfer_ownership": {
+          "type": "object",
+          "required": [
+            "transfer_to"
+          ],
+          "properties": {
+            "transfer_to": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Update announce address of this signer",
+      "type": "object",
+      "required": [
+        "update_announce_address"
+      ],
+      "properties": {
+        "update_announce_address": {
+          "type": "object",
+          "required": [
+            "new_address"
+          ],
+          "properties": {
+            "new_address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "ContractSafeBytes": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      }
+    },
+    "DealingChunkInfo": {
+      "type": "object",
+      "required": [
+        "size"
+      ],
+      "properties": {
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "PartialContractDealing": {
+      "type": "object",
+      "required": [
+        "chunk_index",
+        "data",
+        "dealing_index"
+      ],
+      "properties": {
+        "chunk_index": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "data": {
+          "$ref": "#/definitions/ContractSafeBytes"
+        },
+        "dealing_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

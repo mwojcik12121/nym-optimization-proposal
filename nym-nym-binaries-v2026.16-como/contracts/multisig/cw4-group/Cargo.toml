@@ -1,0 +1,47 @@
+[package]
+name = "cw4-group"
+description = "Simple cw4 implementation of group membership controlled by admin "
+version = "2.0.0"
+authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/CosmWasm/cw-plus"
+homepage = "https://cosmwasm.com"
+documentation = "https://docs.cosmwasm.com"
+publish = false
+exclude = [
+    # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+    "artifacts/*",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "schema"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nym-group-contract-common = { workspace = true }
+nym-contracts-common = { workspace = true }
+nym-contracts-common-testing = { workspace = true, optional = true }
+
+cw-utils = { workspace = true }
+cw2 = { workspace = true }
+cw4 = { workspace = true }
+cw-controllers = { workspace = true }
+cw-storage-plus = { workspace = true }
+cosmwasm-schema = { workspace = true }
+cosmwasm-std = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+easy-addr = { workspace = true }
+
+[features]
+# use library feature to disable all instantiate/execute/query exports
+library = []
+testable-cw4-contract = ["nym-contracts-common-testing"]

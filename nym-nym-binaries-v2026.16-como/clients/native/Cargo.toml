@@ -1,0 +1,74 @@
+[package]
+name = "nym-client"
+description = "Implementation of the Nym Client"
+version = "1.1.83"
+authors = ["Dave Hrycyszyn <futurechimp@users.noreply.github.com>", "Jędrzej Stuczyński <andrew@nymtech.net>"]
+edition = "2021"
+license.workspace = true
+rust-version = "1.85"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "nym_client"
+path = "src/lib.rs"
+
+[dependencies]
+# dependencies to review:
+futures = { workspace = true } # bunch of futures stuff, however, now that I think about it, it could perhaps be completely removed
+# the AsyncRead, AsyncWrite, Stream, Sink, etc. traits could be used from tokio
+# channels should really be replaced with crossbeam due to that implementation being more efficient
+# and the single instance of abortable we have should really be refactored anyway
+url = { workspace = true }
+
+bs58 = { workspace = true }
+clap = { workspace = true, features = ["cargo", "derive"] }
+dirs = { workspace = true }
+log = { workspace = true } # self explanatory
+rand = { workspace = true }
+serde = { workspace = true, features = [
+    "derive",
+] } # for config serialization/deserialization
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tap = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "net",
+    "signal",
+] } # async runtime
+tokio-tungstenite = { workspace = true }
+zeroize = { workspace = true }
+
+## internal
+nym-bandwidth-controller = { workspace = true }
+nym-bin-common = { workspace = true, features = [
+    "output_format",
+    "clap",
+    "basic_tracing",
+] }
+nym-client-core = { workspace = true, features = [
+    "fs-credentials-storage",
+    "fs-surb-storage",
+    "fs-gateways-storage",
+    "cli",
+] }
+nym-config = { workspace = true }
+nym-credential-storage = { workspace = true }
+nym-credentials = { workspace = true }
+nym-crypto = { workspace = true }
+nym-gateway-requests = { workspace = true }
+nym-network-defaults = { workspace = true }
+nym-sphinx = { workspace = true }
+nym-pemstore = { workspace = true }
+nym-task = { workspace = true }
+nym-topology = { workspace = true }
+nym-validator-client = { workspace = true, features = [
+    "http-client",
+] }
+nym-client-websocket-requests = { workspace = true }
+nym-id = { workspace = true }
+
+[dev-dependencies]

@@ -1,0 +1,166 @@
+// Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: Apache-2.0
+
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(thiserror::Error, Debug)]
+pub enum ProtocolError {
+    #[error("invalid service provider type: {0}")]
+    InvalidServiceProviderType(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum ServiceProviderType {
+    NetworkRequester = 0,
+    IpPacketRouter = 1,
+    Authenticator = 2,
+}
+
+impl fmt::Display for ServiceProviderType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NetworkRequester => write!(f, "NetworkRequester"),
+            Self::IpPacketRouter => write!(f, "IpPacketRouter"),
+            Self::Authenticator => write!(f, "Authenticator"),
+        }
+    }
+}
+
+impl TryFrom<u8> for ServiceProviderType {
+    type Error = ProtocolError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::NetworkRequester),
+            1 => Ok(Self::IpPacketRouter),
+            2 => Ok(Self::Authenticator),
+            _ => Err(ProtocolError::InvalidServiceProviderType(value)),
+        }
+    }
+}
+
+pub trait ServiceProviderTypeExt {
+    fn is_network_requester(&self) -> bool;
+    fn is_ip_packet_router(&self) -> bool;
+    fn is_authenticator(&self) -> bool;
+}
+
+impl ServiceProviderTypeExt for ServiceProviderType {
+    fn is_network_requester(&self) -> bool {
+        matches!(self, Self::NetworkRequester)
+    }
+
+    fn is_ip_packet_router(&self) -> bool {
+        matches!(self, Self::IpPacketRouter)
+    }
+
+    fn is_authenticator(&self) -> bool {
+        matches!(self, Self::Authenticator)
+    }
+}
+
+impl ServiceProviderTypeExt for u8 {
+    fn is_network_requester(&self) -> bool {
+        ServiceProviderType::NetworkRequester as u8 == *self
+    }
+
+    fn is_ip_packet_router(&self) -> bool {
+        ServiceProviderType::IpPacketRouter as u8 == *self
+    }
+
+    fn is_authenticator(&self) -> bool {
+        ServiceProviderType::Authenticator as u8 == *self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Protocol {
+    pub version: u8,
+    pub service_provider_type: ServiceProviderType,
+}
+
+impl Protocol {
+    pub const fn new(version: u8, service_provider_type: ServiceProviderType) -> Self {
+        Self {
+            version,
+            service_provider_type,
+        }
+    }
+}
+
+// NOTE: this only works under the assumption of using bincode for serialisation
+// with the current field layout
+impl TryFrom<&[u8; 2]> for Protocol {
+    type Error = ProtocolError;
+
+    fn try_from(bytes: &[u8; 2]) -> Result<Self, Self::Error> {
+        let version = bytes[0];
+        let service_provider_type = ServiceProviderType::try_from(bytes[1])
+            .map_err(|_| ProtocolError::InvalidServiceProviderType(bytes[1]))?;
+
+        Ok(Self {
+            version,
+            service_provider_type,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bincode::Options;
+
+    fn make_bincode_serializer() -> impl bincode::Options {
+        bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_varint_encoding()
+    }
+
+    #[test]
+    fn protocol_serialization() {
+        let protocol = Protocol {
+            version: 4,
+            service_provider_type: ServiceProviderType::NetworkRequester,
+        };
+
+        let serialized = make_bincode_serializer().serialize(&protocol).unwrap();
+        let deserialized: Protocol = make_bincode_serializer().deserialize(&serialized).unwrap();
+
+        assert_eq!(protocol, deserialized);
+    }
+
+    #[test]
+    fn compact_serialization() {
+        let protocol = Protocol {
+            version: 4,
+            service_provider_type: ServiceProviderType::NetworkRequester,
+        };
+
+        let serialized = make_bincode_serializer().serialize(&protocol).unwrap();
+        assert_eq!(serialized.len(), 2);
+    }
+
+    #[test]
+    fn protocol_deserialization() {
+        let bytes = [4, ServiceProviderType::NetworkRequester as u8];
+        let deserialized = Protocol::try_from(&bytes).unwrap();
+
+        let expected = Protocol {
+            version: 4,
+            service_provider_type: ServiceProviderType::NetworkRequester,
+        };
+
+        assert_eq!(expected, deserialized);
+    }
+
+    #[test]
+    fn invalid_protocol_deserialization() {
+        let bytes = [4, 3];
+        let deserialized = Protocol::try_from(&bytes);
+
+        assert!(deserialized.is_err());
+    }
+}

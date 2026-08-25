@@ -1,0 +1,26 @@
+[package]
+name = "nym-tun"
+description = "Nym's tun implementation"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+etherparse = { workspace = true }
+log.workspace = true
+nym-wireguard-types = { workspace = true, optional = true }
+nym-network-defaults = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-tun.workspace = true

@@ -1,0 +1,57 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "target": "es2021",
+    "lib": ["es2021", "dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": false,
+    "declaration": true,
+    "declarationMap": true,
+    "jsx": "react-jsx",
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@assets/*": ["../assets/*"]
+    },
+    /*
+Fix for:
+> @nymproject/types:build
+
+@nymproject/types: $ tsc --noEmit false
+@nymproject/types: error TS2688: Cannot find type definition file for 'minimatch'.
+@nymproject/types:   The file is in the program because:
+@nymproject/types:     Entry point for implicit type library 'minimatch'
+error Command failed with exit code 2.
+
+from https://github.com/strapi/strapi/issues/23859#issuecomment-3047080365
+
+Max: need to look into proper fix / if this breaks something else
+  */
+    "typeRoots": ["./node_modules/@types/*"]
+  },
+  "exclude": [
+    "jest.config.js",
+    "webpack.config.js",
+    "webpack.prod.js",
+    "webpack.common.js",
+    "node_modules",
+    "**/node_modules",
+    "dist",
+    "**/dist",
+    "scripts",
+    "jest",
+    "__tests__",
+    "**/__tests__",
+    "__jest__",
+    "**/__jest__",
+    "config/*"
+  ]
+}

@@ -1,0 +1,24 @@
+[package]
+name = "nym-multisig-contract-common"
+description = "Common code for the Nym multisig CosmWasm smart contract"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version = "1.85"
+readme.workspace = true
+publish = true
+
+[dependencies]
+cosmwasm-schema = { workspace = true }
+cosmwasm-std = { workspace = true }
+cw-storage-plus = { workspace = true }
+cw-utils = { workspace = true }
+cw3 = { workspace = true }
+cw4 = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }

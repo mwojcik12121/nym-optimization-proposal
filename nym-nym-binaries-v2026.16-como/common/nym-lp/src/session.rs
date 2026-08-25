@@ -1,0 +1,515 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: Apache-2.0
+
+//! Session management for the Lewes Protocol.
+//!
+//! This module implements session management functionality, including replay protection
+
+use crate::codec::{decrypt_lp_packet, encrypt_lp_packet};
+use crate::peer::{LpLocalPeer, LpRemotePeer};
+use crate::psq::initiator::HandshakeMode;
+use crate::psq::{
+    InitiatorData, PSQHandshakeState, PSQHandshakeStateInitiator, PSQHandshakeStateResponder,
+    ResponderData,
+};
+use crate::replay::validator::PacketCount;
+use crate::transport::LpHandshakeChannel;
+use crate::{LpError, replay::ReceivingKeyCounterValidator};
+use libcrux_psq::handshake::types::{Authenticator, DHPublicKey};
+use libcrux_psq::session::{Session, SessionBinding};
+use nym_kkt::keys::EncapsulationKey;
+use nym_kkt_ciphersuite::{KEM, KEMKeyDigests};
+use nym_lp_data::packet::header::LpReceiverIndex;
+use nym_lp_data::packet::{EncryptedLpPacket, LpFrame, LpHeader, LpPacket};
+use std::collections::BTreeMap;
+use std::fmt::{Debug, Formatter};
+
+/// Represents inputs that drive the state machine transitions.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum LpInput {
+    /// Received an encrypted LP Packet from the network.
+    ReceivePacket(EncryptedLpPacket),
+
+    /// Application wants to send data (only valid in Transport state).
+    SendFrame(LpFrame),
+}
+
+/// Represents actions the state machine requests the environment to perform.
+#[derive(Debug)]
+pub enum LpAction {
+    /// Send an LP Packet over the network.
+    SendPacket(EncryptedLpPacket),
+
+    /// Deliver decrypted application data received from the peer.
+    DeliverFrame(LpFrame),
+}
+
+pub type SessionId = [u8; 32];
+
+/// A session in the Lewes Protocol..
+///
+/// Sessions manage connection state, including LP replay protection.
+/// Each session has a unique receiving index and sending index for connection identification.
+pub struct LpTransportSession {
+    /// The underlying established session
+    psq_session: Session,
+
+    /// The public key material bound to the underlying session. Used for serialisation.
+    session_binding: PersistentSessionBinding,
+
+    /// The current active transport channel
+    // In the future it might get split between UDP and TCP transports
+    active_transport: libcrux_psq::session::Transport,
+
+    /// Look-up index established during the initial KKT exchange
+    receiver_index: LpReceiverIndex,
+
+    /// Negotiated protocol version from handshake.
+    protocol_version: u8,
+
+    /// Counter for outgoing packets
+    sending_counter: u64,
+
+    /// Validator for incoming packet counters to prevent replay attacks
+    receiving_counter: ReceivingKeyCounterValidator,
+}
+
+/// Wraps public key material that is bound to a session.
+#[derive(Clone)]
+pub struct PersistentSessionBinding {
+    /// The initiator's authenticator value, i.e. a long-term DH public value or signature verification key.
+    pub initiator_authenticator: Authenticator,
+
+    /// The responder's long term DH public value.
+    pub responder_ecdh_pk: DHPublicKey,
+
+    /// The responder's long term PQ-KEM public key (if any).
+    pub responder_pq_pk: Option<EncapsulationKey>,
+
+    /// The initiator's long term PQ-KEM public key (if any).
+    pub initiator_pq_pk: Option<EncapsulationKey>,
+}
+
+impl Debug for PersistentSessionBinding {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistentSessionBinding")
+            .field("initiator_authenticator", &"<initiator_authenticator>")
+            .field("responder_ecdh_pk", &self.responder_ecdh_pk)
+            .field("responder_pq_pk", &self.responder_pq_pk)
+            .finish()
+    }
+}
+
+impl<'a> From<&'a PersistentSessionBinding> for SessionBinding<'a> {
+    fn from(value: &'a PersistentSessionBinding) -> Self {
+        SessionBinding {
+            initiator_authenticator: &value.initiator_authenticator,
+            responder_ecdh_pk: &value.responder_ecdh_pk,
+            responder_pq_pk: value
+                .responder_pq_pk
+                .as_ref()
+                .map(|k| k.as_pq_encapsulation_key()),
+        }
+    }
+}
+
+impl Debug for LpTransportSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LpSession")
+            .field("session_id", &self.psq_session.identifier())
+            .field("session_binding", &self.session_binding)
+            .field("active_transport_id", &self.active_transport.identifier())
+            .field("protocol_version", &self.protocol_version)
+            .field("sending_counter", &self.sending_counter)
+            .field("receiving_counter", &self.receiving_counter)
+            .finish()
+    }
+}
+
+impl LpTransportSession {
+    /// Creates a new session after completed KTT/PSQ exchange
+    pub fn new(
+        mut psq_session: Session,
+        session_binding: PersistentSessionBinding,
+        receiver_index: LpReceiverIndex,
+        protocol_version: u8,
+    ) -> Result<Self, LpError> {
+        // attempt to derive initial transport
+        let transport = psq_session
+            .transport_channel()
+            .map_err(|inner| LpError::TransportDerivationFailure { inner })?;
+
+        Ok(LpTransportSession {
+            psq_session,
+            session_binding,
+            active_transport: transport,
+            receiver_index,
+            protocol_version,
+            sending_counter: 0,
+            receiving_counter: Default::default(),
+        })
+    }
+
+    /// Helper function to create `PSQHandshakeState` for the handshake initiator
+    pub fn psq_handshake_initiator<S>(
+        connection: &'_ mut S,
+        local_peer: LpLocalPeer,
+        remote_peer: LpRemotePeer,
+        remote_protocol_version: u8,
+        mode: HandshakeMode,
+    ) -> Result<PSQHandshakeStateInitiator<'_, S>, LpError>
+    where
+        S: LpHandshakeChannel + Unpin,
+    {
+        PSQHandshakeState::new(connection, local_peer).as_initiator(
+            InitiatorData::new(remote_protocol_version, remote_peer),
+            mode,
+        )
+    }
+
+    /// Helper function to create `PSQHandshakeState` for the handshake initiator for mutual KKT
+    pub fn psq_handshake_initiator_mutual_internode<S>(
+        connection: &'_ mut S,
+        local_peer: LpLocalPeer,
+        remote_peer: LpRemotePeer,
+        remote_protocol_version: u8,
+    ) -> Result<PSQHandshakeStateInitiator<'_, S>, LpError>
+    where
+        S: LpHandshakeChannel + Unpin,
+    {
+        Self::psq_handshake_initiator(
+            connection,
+            local_peer,
+            remote_peer,
+            remote_protocol_version,
+            HandshakeMode::MutualInternode,
+        )
+    }
+
+    /// Helper function to create `PSQHandshakeState` for the handshake responder
+    pub fn psq_handshake_responder<S>(
+        connection: &'_ mut S,
+        local_peer: LpLocalPeer,
+    ) -> PSQHandshakeStateResponder<'_, S>
+    where
+        S: LpHandshakeChannel + Unpin,
+    {
+        PSQHandshakeState::new(connection, local_peer).as_responder(ResponderData::default())
+    }
+
+    /// Helper function to create `PSQHandshakeState` for the handshake responder for mutual KKT
+    pub fn psq_handshake_responder_mutual<S>(
+        connection: &'_ mut S,
+        local_peer: LpLocalPeer,
+        initiator_kem_hashes: BTreeMap<KEM, KEMKeyDigests>,
+    ) -> PSQHandshakeStateResponder<'_, S>
+    where
+        S: LpHandshakeChannel + Unpin,
+    {
+        PSQHandshakeState::new(connection, local_peer)
+            .as_responder(ResponderData::default().with_initiator_kem_hashes(initiator_kem_hashes))
+    }
+
+    pub fn session_binding(&self) -> &PersistentSessionBinding {
+        &self.session_binding
+    }
+
+    pub fn active_transport(&mut self) -> &mut libcrux_psq::session::Transport {
+        &mut self.active_transport
+    }
+
+    pub fn session_identifier(&self) -> &[u8; 32] {
+        self.psq_session.identifier()
+    }
+
+    pub fn receiver_index(&self) -> LpReceiverIndex {
+        self.receiver_index
+    }
+
+    /// Returns the negotiated protocol version from the handshake.
+    ///
+    /// Set during `LpSession` creation after sending / receiving `ClientHelloData`
+    pub fn negotiated_version(&self) -> u8 {
+        self.protocol_version
+    }
+
+    pub fn next_packet(&mut self, frame: LpFrame) -> Result<LpPacket, LpError> {
+        let counter = self.next_counter();
+        let header = LpHeader::new(self.receiver_index(), counter, self.protocol_version);
+        let packet = LpPacket::new(header, frame);
+        Ok(packet)
+    }
+
+    /// Generates the next counter value for outgoing packets.
+    pub fn next_counter(&mut self) -> u64 {
+        let counter = self.sending_counter;
+        self.sending_counter += 1;
+        counter
+    }
+
+    /// Performs a quick validation check for an incoming packet counter.
+    ///
+    /// This should be called before performing any expensive operations like
+    /// decryption/Noise processing to efficiently filter out potential replay attacks.
+    ///
+    /// # Arguments
+    ///
+    /// * `counter` - The counter value to check
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the counter is likely valid
+    /// * `Err(LpError::Replay)` if the counter is invalid or a potential replay
+    pub fn receiving_counter_quick_check(&self, counter: u64) -> Result<(), LpError> {
+        // Branchless implementation uses SIMD when available for constant-time
+        // operations, preventing timing attacks. Check before crypto to save CPU cycles.
+        self.receiving_counter
+            .will_accept_branchless(counter)
+            .map_err(LpError::Replay)
+    }
+
+    /// Marks a counter as received after successful packet processing.
+    ///
+    /// This should be called after a packet has been successfully decoded and processed
+    /// (including Noise decryption/handshake step) to update the replay protection state.
+    ///
+    /// # Arguments
+    ///
+    /// * `counter` - The counter value to mark as received
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the counter was successfully marked
+    /// * `Err(LpError::Replay)` if the counter cannot be marked (duplicate, too old, etc.)
+    pub fn receiving_counter_mark(&mut self, counter: u64) -> Result<(), LpError> {
+        self.receiving_counter
+            .mark_did_receive_branchless(counter)
+            .map_err(LpError::Replay)
+    }
+
+    /// Returns current packet statistics for monitoring.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * The next expected counter value for incoming packets
+    /// * The total number of received packets
+    pub fn current_packet_cnt(&self) -> PacketCount {
+        self.receiving_counter.current_packet_cnt()
+    }
+
+    /// Wrap the provided `LpFrame` into an `LpPacket` and encrypt its content using the established transport session
+    /// to produce an `EncryptedLpPacket`
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - structured `LpFrame` to wrap and encrypt
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(EncryptedLpPacket)` containing the encrypted message ciphertext.
+    /// * `Err(LpError)` if the session is not in transport mode or encryption fails.
+    pub(crate) fn wrap_lp_frame(&mut self, frame: LpFrame) -> Result<EncryptedLpPacket, LpError> {
+        let packet = self.next_packet(frame)?;
+        encrypt_lp_packet(packet, &mut self.active_transport)
+    }
+
+    /// Decrypts an incoming LpPacket
+    ///
+    /// # Arguments
+    ///
+    /// * `packet` - The encrypted packet
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LpPacket)` containing the decrypted application data payload.
+    /// * `Err(LpError)` if the session is not in transport mode, decryption fails, or the message is not data.
+    pub(crate) fn decrypt_packet(
+        &mut self,
+        packet: EncryptedLpPacket,
+    ) -> Result<LpPacket, LpError> {
+        decrypt_lp_packet(packet, &mut self.active_transport)
+    }
+
+    /// Processes an input event and returns an action to perform.
+    pub fn process_input(&mut self, input: LpInput) -> Result<LpAction, LpError> {
+        match input {
+            LpInput::ReceivePacket(packet) => {
+                // Check if packet lp_id matches our session
+                if packet.outer_header().receiver_idx != self.receiver_index() {
+                    return Err(LpError::UnknownSessionId(
+                        packet.outer_header().receiver_idx,
+                    ));
+                }
+
+                let ctr = packet.outer_header().counter;
+
+                // 1. Check replay protection
+                self.receiving_counter_quick_check(ctr)?;
+
+                // 2. decrypt the packet and attempt to deliver data
+                let packet = self.decrypt_packet(packet)?;
+
+                // 3. Mark counter as received
+                self.receiving_counter_mark(ctr)?;
+
+                // 4. deliver the message
+                Ok(LpAction::DeliverFrame(packet.into_frame()))
+            }
+            LpInput::SendFrame(data) => {
+                // Encrypt and send application data
+                match self.wrap_lp_frame(data) {
+                    Ok(packet) => Ok(LpAction::SendPacket(packet)),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ReplayError, SessionsMock};
+    use nym_kkt_ciphersuite::{IntoEnumIterator, KEM};
+
+    #[test]
+    fn test_session_creation() {
+        for kem in KEM::iter() {
+            let mut session = SessionsMock::mock_post_handshake(kem).responder;
+
+            // Initial counter should be zero
+            let counter = session.next_counter();
+            assert_eq!(counter, 0);
+
+            // Counter should increment
+            let counter = session.next_counter();
+            assert_eq!(counter, 1);
+        }
+    }
+
+    #[test]
+    fn test_replay_protection_sequential() {
+        for kem in KEM::iter() {
+            let mut session = SessionsMock::mock_post_handshake(kem).responder;
+
+            // Sequential counters should be accepted
+            assert!(session.receiving_counter_quick_check(0).is_ok());
+            assert!(session.receiving_counter_mark(0).is_ok());
+
+            assert!(session.receiving_counter_quick_check(1).is_ok());
+            assert!(session.receiving_counter_mark(1).is_ok());
+
+            // Duplicates should be rejected
+            assert!(session.receiving_counter_quick_check(0).is_err());
+            let err = session.receiving_counter_mark(0).unwrap_err();
+            match err {
+                LpError::Replay(replay_error) => {
+                    assert!(matches!(replay_error, ReplayError::DuplicateCounter));
+                }
+                _ => panic!("Expected replay error"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_replay_protection_out_of_order() {
+        for kem in KEM::iter() {
+            let mut session = SessionsMock::mock_post_handshake(kem).responder;
+
+            // Receive packets in order
+            assert!(session.receiving_counter_mark(0).is_ok());
+            assert!(session.receiving_counter_mark(1).is_ok());
+            assert!(session.receiving_counter_mark(2).is_ok());
+
+            // Skip ahead
+            assert!(session.receiving_counter_mark(10).is_ok());
+
+            // Can still receive out-of-order packets within window
+            assert!(session.receiving_counter_quick_check(5).is_ok());
+            assert!(session.receiving_counter_mark(5).is_ok());
+
+            // But duplicates are still rejected
+            assert!(session.receiving_counter_quick_check(5).is_err());
+            assert!(session.receiving_counter_mark(5).is_err());
+        }
+    }
+
+    #[test]
+    fn test_packet_stats() {
+        for kem in KEM::iter() {
+            let mut session = SessionsMock::mock_post_handshake(kem).responder;
+
+            // Initial stats
+            let packet_count = session.current_packet_cnt();
+            assert_eq!(packet_count.next, 0);
+            assert_eq!(packet_count.received, 0);
+
+            // After receiving packets
+            assert!(session.receiving_counter_mark(0).is_ok());
+            assert!(session.receiving_counter_mark(1).is_ok());
+
+            let packet_count = session.current_packet_cnt();
+            assert_eq!(packet_count.next, 2);
+            assert_eq!(packet_count.received, 2);
+        }
+    }
+
+    #[test]
+    fn test_state_machine_simplified_flow() {
+        for kem in KEM::iter() {
+            let mock_sessions = SessionsMock::mock_post_handshake(kem);
+            let receiver_index = mock_sessions.responder.receiver_index();
+
+            // Create state machines (already in Transport)
+            let mut initiator = mock_sessions.initiator;
+            let mut responder = mock_sessions.responder;
+
+            assert_eq!(
+                initiator.session_identifier(),
+                responder.session_identifier()
+            );
+
+            // --- Transport Phase ---
+            println!("--- Step 1: Initiator sends data ---");
+            let data_to_send_1 = LpFrame::new_opaque(b"hello responder".to_vec());
+            let init_actions_4 =
+                initiator.process_input(LpInput::SendFrame(data_to_send_1.clone()));
+            let data_packet_1 = if let Ok(LpAction::SendPacket(packet)) = init_actions_4 {
+                packet.clone()
+            } else {
+                panic!("Initiator should send data packet");
+            };
+            assert_eq!(data_packet_1.outer_header().receiver_idx, receiver_index);
+
+            println!("--- Step 2: Responder receives data ---");
+            let resp_actions_5 = responder.process_input(LpInput::ReceivePacket(data_packet_1));
+            let resp_data_1 = if let Ok(LpAction::DeliverFrame(data)) = resp_actions_5 {
+                data
+            } else {
+                panic!("Responder should deliver data");
+            };
+            assert_eq!(resp_data_1, data_to_send_1);
+
+            println!("--- Step 3: Responder sends data ---");
+            let data_to_send_2 = LpFrame::new_opaque(b"hello initiator".to_vec());
+            let resp_actions_6 =
+                responder.process_input(LpInput::SendFrame(data_to_send_2.clone()));
+            let data_packet_2 = if let Ok(LpAction::SendPacket(packet)) = resp_actions_6 {
+                packet.clone()
+            } else {
+                panic!("Responder should send data packet");
+            };
+            assert_eq!(data_packet_2.outer_header().receiver_idx, receiver_index);
+
+            println!("--- Step 4: Initiator receives data ---");
+            let init_actions_5 = initiator.process_input(LpInput::ReceivePacket(data_packet_2));
+            if let Ok(LpAction::DeliverFrame(data)) = init_actions_5 {
+                assert_eq!(data, data_to_send_2);
+            } else {
+                panic!("Initiator should deliver data");
+            }
+        }
+    }
+}

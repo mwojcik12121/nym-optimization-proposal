@@ -1,0 +1,146 @@
+// Copyright 2021-2024 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::{error::GatewayStorageError, make_bincode_serializer};
+use defguard_wireguard_rs::key::Key;
+use nym_credentials_interface::{AvailableBandwidth, ClientTicket, CredentialSpendingData};
+use nym_gateway_requests::shared_key::SharedSymmetricKey;
+use sqlx::FromRow;
+use time::OffsetDateTime;
+
+pub struct Client {
+    pub id: i64,
+    pub client_type: crate::clients::ClientType,
+}
+
+#[derive(FromRow)]
+pub struct PersistedSharedKeys {
+    pub client_id: i64,
+
+    #[allow(dead_code)]
+    pub client_address_bs58: String,
+    pub derived_aes256_gcm_siv_key: Vec<u8>,
+    pub last_used_authentication: Option<OffsetDateTime>,
+}
+
+impl TryFrom<PersistedSharedKeys> for SharedSymmetricKey {
+    type Error = GatewayStorageError;
+
+    fn try_from(value: PersistedSharedKeys) -> Result<Self, Self::Error> {
+        SharedSymmetricKey::try_from_bytes(&value.derived_aes256_gcm_siv_key)
+            .map_err(|source| GatewayStorageError::DataCorruption(source.to_string()))
+    }
+}
+
+#[derive(FromRow)]
+pub struct StoredMessage {
+    pub id: i64,
+    #[allow(dead_code)]
+    pub client_address_bs58: String,
+    pub content: Vec<u8>,
+    pub timestamp: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct PersistedBandwidth {
+    #[allow(dead_code)]
+    pub client_id: i64,
+    pub available: i64,
+    pub expiration: Option<OffsetDateTime>,
+}
+
+impl From<PersistedBandwidth> for AvailableBandwidth {
+    fn from(value: PersistedBandwidth) -> Self {
+        AvailableBandwidth {
+            bytes: value.available,
+            expiration: value.expiration.unwrap_or(OffsetDateTime::UNIX_EPOCH),
+        }
+    }
+}
+
+#[derive(FromRow)]
+pub struct VerifiedTicket {
+    pub serial_number: Vec<u8>,
+    pub ticket_id: i64,
+}
+
+#[derive(FromRow)]
+pub struct RedemptionProposal {
+    pub proposal_id: i64,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(FromRow)]
+pub struct UnverifiedTicketData {
+    pub data: Vec<u8>,
+    pub ticket_id: i64,
+}
+
+impl TryFrom<UnverifiedTicketData> for ClientTicket {
+    type Error = GatewayStorageError;
+
+    fn try_from(value: UnverifiedTicketData) -> Result<Self, Self::Error> {
+        Ok(ClientTicket {
+            spending_data: CredentialSpendingData::try_from_bytes(&value.data).map_err(|_| {
+                GatewayStorageError::MalformedStoredTicketData {
+                    ticket_id: value.ticket_id,
+                }
+            })?,
+            ticket_id: value.ticket_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct WireguardPeer {
+    pub public_key: String,
+    pub allowed_ips: Vec<u8>,
+    pub client_id: i64,
+    pub psk: Option<String>,
+}
+
+impl WireguardPeer {
+    pub fn from_defguard_peer(
+        value: defguard_wireguard_rs::host::Peer,
+        client_id: i64,
+    ) -> Result<Self, crate::error::GatewayStorageError> {
+        Ok(WireguardPeer {
+            public_key: value.public_key.to_string(),
+            allowed_ips: bincode::Options::serialize(make_bincode_serializer(), &value.allowed_ips)
+                .map_err(|source| crate::error::GatewayStorageError::Serialize {
+                    field_key: "allowed_ips",
+                    source,
+                })?,
+            client_id,
+            psk: value.preshared_key.map(|psk| psk.to_lower_hex()),
+        })
+    }
+}
+
+impl TryFrom<WireguardPeer> for defguard_wireguard_rs::host::Peer {
+    type Error = crate::error::GatewayStorageError;
+
+    fn try_from(value: WireguardPeer) -> Result<Self, Self::Error> {
+        Ok(Self {
+            public_key: value.public_key.as_str().try_into().map_err(|_| {
+                Self::Error::TypeConversion {
+                    field_key: "public_key",
+                }
+            })?,
+            allowed_ips: bincode::Options::deserialize(
+                bincode::DefaultOptions::new(),
+                &value.allowed_ips,
+            )
+            .map_err(|source| Self::Error::Deserialize {
+                field_key: "allowed_ips",
+                source,
+            })?,
+            preshared_key: value
+                .psk
+                .map(|psk| Key::decode(&psk))
+                .transpose()
+                .map_err(|_| Self::Error::TypeConversion { field_key: "psk" })?,
+            ..Default::default()
+        })
+    }
+}

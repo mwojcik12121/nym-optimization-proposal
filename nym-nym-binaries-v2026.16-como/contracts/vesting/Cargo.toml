@@ -1,0 +1,49 @@
+[package]
+name = "nym-vesting-contract"
+description = "Nym vesting contract"
+version = "1.4.1"
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+readme = "README.md"
+publish = false
+exclude = [
+    # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+    "contract.wasm",
+    "hash.txt",
+    "artifacts",
+]
+
+[[bin]]
+name = "schema"
+required-features = ["schema-gen"]
+
+[lib]
+name = "vesting_contract"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mixnet-contract-common = { workspace = true }
+contracts-common = { workspace = true }
+vesting-contract-common = { workspace = true }
+
+cosmwasm-schema = { workspace = true, optional = true }
+cosmwasm-std = { workspace = true }
+cosmwasm-derive = { workspace = true }
+cw2 = { workspace = true }
+cw-storage-plus = { workspace = true, features = ["iterator"] }
+
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rand_chacha = "0.3.1"
+base64 = "0.21.0"
+hex = "0.4.3"
+serde_json = "1.0.66"
+cosmwasm-crypto = { workspace = true }
+
+
+[features]
+schema-gen = ["vesting-contract-common/schema", "cosmwasm-schema"]

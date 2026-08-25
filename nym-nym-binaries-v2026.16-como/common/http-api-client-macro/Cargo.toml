@@ -1,0 +1,33 @@
+[package]
+name = "nym-http-api-client-macro"
+description = "Proc-macros for configuring HTTP clients globally via the `inventory` crate"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+syn = { workspace = true, features = ["full"] }
+quote = "1.0.40"
+proc-macro-crate = "3"
+uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+nym-http-api-client = { workspace = true }
+reqwest = { workspace = true }
+
+[features]
+debug-inventory = []
+
+[lints]
+workspace = true

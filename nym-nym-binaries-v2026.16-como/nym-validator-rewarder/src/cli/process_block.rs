@@ -1,0 +1,32 @@
+// Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::cli::{ConfigOverridableArgs, try_load_current_config};
+use crate::error::NymRewarderError;
+use nyxd_scraper_sqlite::SqliteNyxdScraper;
+use std::path::PathBuf;
+
+#[derive(Debug, clap::Args)]
+pub struct Args {
+    #[command(flatten)]
+    config_override: ConfigOverridableArgs,
+
+    /// Height of the block we want to process
+    #[clap(long, env = "NYM_VALIDATOR_REWARDER_PROCESS_BLOCK_HEIGHT")]
+    height: u32,
+
+    /// Specifies custom location for the configuration file of nym validators rewarder.
+    #[clap(long, env = "NYM_VALIDATOR_REWARDER_PROCESS_BLOCK_CONFIG_PATH")]
+    custom_config_path: Option<PathBuf>,
+}
+
+pub(crate) async fn execute(args: Args) -> Result<(), NymRewarderError> {
+    let config =
+        try_load_current_config(&args.custom_config_path)?.with_override(args.config_override);
+
+    SqliteNyxdScraper::new(config.scraper_config()?)
+        .await?
+        .unsafe_process_single_block(args.height)
+        .await?;
+    Ok(())
+}

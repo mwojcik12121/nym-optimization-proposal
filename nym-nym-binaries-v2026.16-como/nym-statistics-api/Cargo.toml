@@ -1,0 +1,56 @@
+# Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "nym-statistics-api"
+version = "0.3.1"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+axum = { workspace = true, features = ["tokio", "macros"] }
+axum-client-ip.workspace = true
+axum-extra = { workspace = true, features = ["typed-header"] }
+celes.workspace = true
+clap = { workspace = true, features = ["cargo", "derive", "env", "string"] }
+serde_json.workspace = true
+sqlx = { workspace = true, features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "time",
+] }
+time = { workspace = true, features = ["serde-human-readable"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+url.workspace = true
+utoipa = { workspace = true, features = ["axum_extras", "time"] }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+utoipauto.workspace = true
+
+#internal
+nym-bin-common = { workspace = true }
+nym-http-api-common = { workspace = true, features = [
+    "middleware",
+] }
+nym-statistics-common = { workspace = true, features = [
+    "openapi",
+] }
+nym-task = { workspace = true }
+
+nym-http-api-client = { workspace = true }
+nym-validator-client = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }

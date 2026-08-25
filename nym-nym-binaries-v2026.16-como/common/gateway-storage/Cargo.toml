@@ -1,0 +1,49 @@
+[package]
+name = "nym-gateway-storage"
+description = "Crate handling db setup and use for Nym Gateways, used for credentials, packets, connections"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+async-trait = { workspace = true }
+bincode = { workspace = true }
+defguard_wireguard_rs = { workspace = true }
+dyn-clone = { workspace = true }
+sqlx = { workspace = true, features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "macros",
+    "migrate",
+    "time",
+    "chrono"
+] }
+time = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
+tracing = { workspace = true }
+
+nym-credentials-interface = { workspace = true }
+nym-gateway-requests = { workspace = true }
+nym-sphinx = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+sqlx = { workspace = true, features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "macros",
+    "migrate",
+] }
+
+[features]
+default = []
+mock = ["tokio"]

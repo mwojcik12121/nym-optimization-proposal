@@ -1,0 +1,32 @@
+[package]
+name = "nym-sphinx-anonymous-replies"
+description = "Anonymous sphinx packet replies using singly-use-reply-blocks (SURB)"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+rand = { workspace = true }
+bs58 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+nym-crypto = { workspace = true, features = ["stream_cipher", "rand"] }
+nym-sphinx-addressing = { workspace = true }
+nym-sphinx-params = { workspace = true }
+nym-sphinx-routing = { workspace = true }
+nym-sphinx-types = { workspace = true }
+nym-topology = { workspace = true }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies.wasm-bindgen]
+workspace = true
+
+[dev-dependencies]
+rand_chacha = { workspace = true }

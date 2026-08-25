@@ -1,0 +1,52 @@
+name: ci-build-ts
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "ts-packages/**"
+      - "sdk/typescript/**"
+      - ".github/workflows/ci-build-ts.yml"
+
+env:
+  S3_ENDPOINT: https://s3.nymte.ch
+  S3_BUCKET: builds
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v6
+    - uses: rlespinasse/github-slug-action@v3.x
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6.0.9
+      with:
+        version: 11.1.2
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - name: Build
+      run: pnpm install && pnpm build && pnpm build:ci:storybook
+    - name: Publish storybook to S3
+      continue-on-error: true
+      uses: ./.github/actions/push-to-s3
+      with:
+        source_path: ts-packages/dist/storybook/
+        destination: ts-${{ env.GITHUB_REF_SLUG }}/
+        args: "--delete"
+        endpoint: ${{ env.S3_ENDPOINT }}
+        bucket: ${{ env.S3_BUCKET }}
+        aws_access_key_id: ${{ secrets.GARAGE_AWS_ACCESS_KEY_ID }}
+        aws_secret_access_key: ${{ secrets.GARAGE_AWS_SECRET_ACCESS_KEY }}
+    - name: Publish example to S3
+      continue-on-error: true
+      uses: ./.github/actions/push-to-s3
+      with:
+        source_path: ts-packages/dist/example/
+        destination: ts-${{ env.GITHUB_REF_SLUG }}-example/
+        args: "--delete"
+        endpoint: ${{ env.S3_ENDPOINT }}
+        bucket: ${{ env.S3_BUCKET }}
+        aws_access_key_id: ${{ secrets.GARAGE_AWS_ACCESS_KEY_ID }}
+        aws_secret_access_key: ${{ secrets.GARAGE_AWS_SECRET_ACCESS_KEY }}

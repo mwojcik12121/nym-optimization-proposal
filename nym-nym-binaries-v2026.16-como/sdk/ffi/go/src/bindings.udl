@@ -1,0 +1,44 @@
+[Error]
+enum GoWrapError {
+  "ClientInitError",
+  "SelfAddrError",
+  "SendMsgError",
+  "ReplyError",
+  "ListenError",
+  "ProxyInitError",
+  "ProxyRunError",
+  "ServerInitError",
+  "AddressGetterError",
+  "ServerRunError"
+};
+
+dictionary IncomingMessage {
+    string message;
+    bytes  sender;
+};
+
+namespace bindings {
+  void init_logging();
+  [Throws=GoWrapError]
+  void init_ephemeral();
+  [Throws=GoWrapError]
+  string get_self_address();
+  [Throws=GoWrapError]
+  void send_message(string recipient, string message);
+  [Throws=GoWrapError]
+  void reply(bytes recipient, string message);
+  [Throws=GoWrapError]
+  IncomingMessage listen_for_incoming();
+  [Throws=GoWrapError]
+  void new_proxy_client(string server_address, string listen_address, string listen_port, u64 close_timeout, string? env, u8 pool_size);
+  [Throws=GoWrapError]
+  void new_proxy_client_default(string server_address, string? env);
+  [Throws=GoWrapError]
+  void run_proxy_client();
+  [Throws=GoWrapError]
+  void new_proxy_server(string upstream_address, string config_dir, string? env, string? gateway);
+  [Throws=GoWrapError]
+  string proxy_server_address();
+  [Throws=GoWrapError]
+  void run_proxy_server();
+};

@@ -1,0 +1,26 @@
+[package]
+name = "nym-sphinx-addressing"
+description = "Nym mixnet addressing"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+nym-crypto = { workspace = true, features = ["asymmetric", "sphinx"] } # all addresses are expressed in terms on their crypto keys
+nym-sphinx-types = { workspace = true, features = ["sphinx"] } # we need to be able to refer to some types defined inside sphinx crate
+serde = { workspace = true } # implementing serialization/deserialization for some types, like `Recipient`
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+nym-crypto = { workspace = true, features = ["rand"] }
+bincode = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

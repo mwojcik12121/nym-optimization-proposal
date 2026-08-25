@@ -1,0 +1,95 @@
+name: cd-docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: arc-ubuntu-22.04
+    env:
+      NEXT_PUBLIC_SITE_URL: https://nym.com/docs
+    defaults:
+      run:
+        working-directory: documentation/docs
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Dependencies (Linux)
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget libssl-dev libudev-dev squashfs-tools protobuf-compiler git python3 && sudo apt-get update --fix-missing
+      - name: Install Python3 modules
+        run: sudo apt install -y python3-pandas python3-tabulate
+      - name: Install rsync
+        run: sudo apt-get install -y rsync
+      - uses: rlespinasse/github-slug-action@v3.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+      - name: Build all binaries
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --workspace --release
+
+      - name: Verify doc versions
+        run: ${{ github.workspace }}/documentation/scripts/verify-doc-versions.sh
+        working-directory: ${{ github.workspace }}
+      - name: Install project dependencies
+        run: pnpm i
+      - name: Generate llms-full.txt
+        run: pnpm run generate:llms
+      - name: Build project
+        run: pnpm run build
+      - name: Generate sitemap
+        run: npx next-sitemap
+      - name: Move files to /dist/
+        run: ../scripts/move-to-dist.sh
+
+      - name: Create Vercel project file
+        uses: mobiledevops/secret-to-file-action@v1
+        with:
+          base64-encoded-secret: ${{ secrets.VERCEL_PROJECT_JSON_BASE64 }}
+          filename: "project.json"
+          is-executable: true
+          working-directory: "./dist/docs/.vercel"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+        continue-on-error: false
+
+      - name: Pull Vercel Environment Information (preview)
+        if: github.ref != 'refs/heads/master'
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+      - name: Pull Vercel Environment Information (production)
+        if: github.ref == 'refs/heads/master'
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+        continue-on-error: false
+
+      - name: Build Project Artifacts (preview)
+        if: github.ref != 'refs/heads/master'
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+        continue-on-error: false
+      - name: Build Project Artifacts (production)
+        if: github.ref == 'refs/heads/master'
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+        continue-on-error: false
+
+      - name: Deploy Project Artifacts to Vercel (preview)
+        if: github.ref != 'refs/heads/master'
+        run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+      - name: Deploy Project Artifacts to Vercel (master)
+        if: github.ref == 'refs/heads/master'
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: dist/docs
+        continue-on-error: false

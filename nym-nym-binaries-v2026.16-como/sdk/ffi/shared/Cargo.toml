@@ -1,0 +1,34 @@
+[package]
+name = "nym-ffi-shared"
+description = "Common crate for use by Rust SDK FFI crates"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+# Nym clients, addressing, packet format, common tools (logging)
+nym-sdk = { workspace = true }
+nym-bin-common = { workspace = true }
+nym-crypto = { workspace = true }
+nym-sphinx-anonymous-replies = { workspace = true }
+# static var macro
+lazy_static = { workspace = true }
+# error handling
+anyhow = { workspace = true }
+# base58 en/decoding
+bs58 = { workspace = true }
+# UDL test
+uniffi = { workspace = true, features = ["cli"] }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+uniffi_build = { workspace = true, features = ["builtin-bindgen"] }

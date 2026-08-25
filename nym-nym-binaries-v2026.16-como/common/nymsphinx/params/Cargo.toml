@@ -1,0 +1,25 @@
+[package]
+name = "nym-sphinx-params"
+description = "Sphinx packet parameters for the Nym mixnet"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+nym-crypto = { workspace = true, features = ["hashing", "stream_cipher", "aead"] }
+nym-sphinx-types = { workspace = true }
+
+[features]
+default = ["sphinx"]
+sphinx = ["nym-sphinx-types/outfox"]
+outfox = ["nym-sphinx-types/outfox"]

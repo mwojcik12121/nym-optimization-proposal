@@ -1,0 +1,58 @@
+name: ci-sdk-wasm
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "wasm/**"
+      - "clients/client-core/**"
+      - "common/**"
+      - "sdk/rust/nym-swizzle/**"
+      - "sdk/rust/nym-swizzle-zcash/**"
+      - ".github/workflows/ci-sdk-wasm.yml"
+
+jobs:
+  wasm:
+    runs-on: arc-linux-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_PERMIT_COPY_RENAME: 1
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+          target: wasm32-unknown-unknown
+          override: true
+          components: rustfmt, clippy
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install wasm-opt
+        uses: ./.github/actions/install-wasm-opt
+        with:
+          version: "116"
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli
+
+      - name: Set debug to false
+        run: |
+          sed -i.bak 's/\[profile.dev\]/\[profile.dev\]\ndebug = false/' Cargo.toml
+          git diff
+
+      - name: "Build"
+        run: make sdk-wasm-build
+
+      - name: "Test"
+        run: make sdk-wasm-test
+
+      - name: "Lint"
+        run: make sdk-wasm-lint

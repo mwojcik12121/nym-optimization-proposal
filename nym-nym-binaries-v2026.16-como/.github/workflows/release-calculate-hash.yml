@@ -1,0 +1,36 @@
+name: release-calculate-hash
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Release tag'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Calculate hash for assets in release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: nymtech/nym/.github/actions/nym-hash-releases@develop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release-tag-or-name-or-id: ${{ inputs.release_tag }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Asset Hashes
+          path: hashes.json

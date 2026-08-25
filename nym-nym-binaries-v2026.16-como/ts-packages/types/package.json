@@ -1,0 +1,42 @@
+{
+  "name": "@nymproject/types",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "peerDependencies": {
+    "@cosmjs/math": "^0.27.1",
+    "bs58": "4",
+    "bech32": "^1.1.4"
+  },
+  "devDependencies": {
+    "@nymproject/eslint-config-react-typescript": "workspace:*",
+    "@types/bs58": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "babel-plugin-root-import": "^5.1.0",
+    "eslint": "catalog:",
+    "eslint-config-airbnb": "catalog:",
+    "eslint-config-airbnb-typescript": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-import-resolver-root-import": "catalog:",
+    "eslint-plugin-import": "catalog:",
+    "eslint-plugin-jest": "catalog:",
+    "eslint-plugin-jsx-a11y": "catalog:",
+    "eslint-plugin-prettier": "catalog:",
+    "eslint-plugin-react": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
+    "jest": "catalog:",
+    "prettier": "catalog:",
+    "rimraf": "catalog:",
+    "ts-jest": "catalog:",
+    "typescript": "^4.6.2"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsc --noEmit false",
+    "watch": "tsc --noEmit false -w",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix"
+  }
+}

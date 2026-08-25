@@ -1,0 +1,63 @@
+name: ci-lint-typescript
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "ts-packages/**"
+      - "sdk/typescript/**"
+      - "nym-wallet/src/**"
+      - "nym-wallet/package.json"
+      - "explorer-v2/**"
+      - ".github/workflows/ci-lint-typescript.yml"
+
+jobs:
+  build:
+    runs-on: arc-linux-latest
+    env:
+      RUSTUP_PERMIT_COPY_RENAME: 1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rlespinasse/github-slug-action@v3.x
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt
+
+      # Produce wasm/smolmix/pkg/package.json before any pnpm step. The
+      # `pnpm dev:on` in `prebuild:ci` adds wasm/smolmix/pkg to the dynamic
+      # workspace; mix-tunnel's `workspace:*` lookup against @nymproject/
+      # smolmix-wasm needs the package.json to be present.
+      - name: Build smolmix wasm
+        run: make -C wasm/smolmix
+
+      - name: Install
+        run: pnpm i
+
+      - name: Build packages
+        run: pnpm build:ci
+
+      - name: Install again
+        run: pnpm i
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck with tsc
+        run: pnpm tsc

@@ -1,0 +1,29 @@
+[package]
+name = "nym-vesting-contract-common"
+description = "Common library for the Nym vesting contract"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version = "1.85"
+readme.workspace = true
+publish = true
+
+[dependencies]
+cosmwasm-std = { workspace = true }
+cosmwasm-schema = { workspace = true }
+cw2 = { workspace = true, optional = true }
+nym-mixnet-contract-common = { workspace = true }
+nym-contracts-common = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+# without this feature, cargo clippy emits a ton of incompatibility warnings
+# https://docs.rs/ts-rs/latest/ts_rs/#serde-compatability
+ts-rs = { workspace = true, optional = true, features = ["no-serde-warnings"] }
+
+[features]
+schema = ["cw2"]
+generate-ts = ["ts-rs"]

@@ -1,0 +1,98 @@
+{
+  "name": "@nymproject/react",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./*": "./dist/components/*",
+    "./hooks/*": "./dist/hooks/*",
+    "./playground/*": "./dist/playground/*"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "dist/components/*"
+      ],
+      "hooks/*": [
+        "dist/hooks/*"
+      ],
+      "playground/*": [
+        "dist/playground/*"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@cosmjs/math": "^0.27.1",
+    "@mui/icons-material": ">= 5",
+    "@mui/lab": "^5.0.0-alpha.72",
+    "@mui/material": "5",
+    "@mui/styles": "5",
+    "@mui/system": "5",
+    "@nymproject/mui-theme": "workspace:*",
+    "@nymproject/nym-validator-client": "^0.18.0",
+    "@nymproject/types": "workspace:*",
+    "base58": "2",
+    "bech32": "^1.1.4",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zxcvbn": "^4.4.2"
+  },
+  "dependencies": {
+    "@mui/lab": "catalog:",
+    "@mui/x-tree-view": "catalog:",
+    "flat": "catalog:",
+    "use-clipboard-copy": "catalog:"
+  },
+  "devDependencies": {
+    "@babel/core": "catalog:",
+    "@nymproject/eslint-config-react-typescript": "workspace:*",
+    "@storybook/addon-actions": "catalog:",
+    "@storybook/addon-docs": "catalog:",
+    "@storybook/addon-essentials": "catalog:",
+    "@storybook/addon-interactions": "catalog:",
+    "@storybook/addon-links": "catalog:",
+    "@storybook/builder-webpack5": "catalog:",
+    "@storybook/manager-webpack5": "catalog:",
+    "@storybook/react": "catalog:",
+    "@storybook/testing-library": "catalog:",
+    "@svgr/webpack": "catalog:",
+    "@types/flat": "catalog:",
+    "@types/zxcvbn": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "babel-loader": "catalog:",
+    "babel-plugin-root-import": "^5.1.0",
+    "eslint": "catalog:",
+    "eslint-config-airbnb": "catalog:",
+    "eslint-config-airbnb-typescript": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-import-resolver-root-import": "catalog:",
+    "eslint-plugin-import": "catalog:",
+    "eslint-plugin-jest": "catalog:",
+    "eslint-plugin-jsx-a11y": "catalog:",
+    "eslint-plugin-prettier": "catalog:",
+    "eslint-plugin-react": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
+    "eslint-plugin-storybook": "catalog:",
+    "jest": "catalog:",
+    "prettier": "catalog:",
+    "rimraf": "catalog:",
+    "ts-jest": "catalog:",
+    "tsconfig-paths-webpack-plugin": "catalog:",
+    "typescript": "^4.6.2"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "tsc": "tsc --noEmit true",
+    "build": "tsc --noEmit false",
+    "watch": "tsc --noEmit false -w",
+    "lint": "eslint src .storybook",
+    "lint:fix": "eslint src .storybook --fix",
+    "storybook": "start-storybook -p 6006",
+    "storybook:build": "build-storybook"
+  },
+  "sideEffects": false
+}

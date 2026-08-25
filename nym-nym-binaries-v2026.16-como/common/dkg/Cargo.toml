@@ -1,0 +1,56 @@
+[package]
+name = "nym-dkg"
+description = "Nym's Distributed Key Generation functionality"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+resolver = "2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitvec = { workspace = true }
+
+# unfortunately until https://github.com/zkcrypto/nym-bls12_381-fork/issues/10 is resolved, we have to rely on the fork
+# as we need to be able to serialize Gt so that we could create the lookup table for baby-step-giant-step algorithm
+nym-bls12_381-fork = { workspace = true, features = ["alloc", "pairings", "experimental", "zeroize"] }
+nym-contracts-common = { workspace = true, optional = true }
+bs58 = { workspace = true }
+
+
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_derive = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
+
+nym-pemstore = { workspace = true }
+
+[dependencies.group]
+workspace = true
+default-features = false
+
+[dependencies.ff]
+workspace = true
+default-features = false
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[features]
+default = []
+cw-types = ["nym-contracts-common"]

@@ -1,0 +1,21 @@
+[package]
+name = "nym-sphinx-routing"
+description = "Sphinx packet routing as Nym mix packets"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+nym-sphinx-addressing = { workspace = true }
+nym-sphinx-types = { workspace = true, features = ["sphinx"] }
+
+[features]

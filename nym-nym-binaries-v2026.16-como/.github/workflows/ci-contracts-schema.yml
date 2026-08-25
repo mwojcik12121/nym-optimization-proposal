@@ -1,0 +1,30 @@
+name: ci-contracts-schema
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'common/**'
+      - '.github/workflows/ci-contracts-schema.yml'
+
+jobs:
+  check-schema:
+    name: Generate and check schema
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+
+      - name: Generate the schema
+        run: make contract-schema
+
+      - name: Check for diff
+        run: git diff --exit-code -- contracts/**/schema

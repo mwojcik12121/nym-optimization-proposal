@@ -1,0 +1,48 @@
+[package]
+name = "nym-mixnet-contract-common"
+description = "Common library for the Nym mixnet contract"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version = "1.85"
+readme.workspace = true
+publish = true
+
+[dependencies]
+bs58 = { workspace = true }
+cosmwasm-std = { workspace = true }
+cosmwasm-schema = { workspace = true }
+cw-storage-plus.workspace = true
+cw-controllers = { workspace = true }
+cw2 = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_repr = { workspace = true }
+semver = { workspace = true, features = ["serde"] }
+
+# we still have to preserve that import for `JsonSchema` for `Layer` type (since we can't use cw_serde macro due to custom serde impl)
+schemars = { workspace = true }
+thiserror = { workspace = true }
+nym-contracts-common = { workspace = true }
+humantime-serde = { workspace = true }
+utoipa = { workspace = true, optional = true }
+
+time = { workspace = true, features = ["parsing", "formatting"] }
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+rand_chacha = { workspace = true }
+time = { workspace = true, features = ["serde", "macros"] }
+
+[features]
+default = []
+contract-testing = []
+utoipa = ["dep:utoipa"]
+schema = ["cw2"]
+generate-ts = ['ts-rs']
+
+[lints]
+workspace = true

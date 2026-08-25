@@ -1,0 +1,33 @@
+[package]
+name = "nym-sphinx-framing"
+description = "Sphinx packet framing for the Nym mixnet"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+bytes = { workspace = true }
+cfg-if = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+nym-sphinx-types = { workspace = true, features = ["sphinx", "outfox"] }
+nym-sphinx-params = { workspace = true, features = ["sphinx", "outfox"] }
+nym-sphinx-forwarding = { workspace = true }
+nym-sphinx-addressing = { workspace = true }
+nym-sphinx-acknowledgements = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+# When enabled, mix nodes skip ack extraction and forwarding
+no-mix-acks = []

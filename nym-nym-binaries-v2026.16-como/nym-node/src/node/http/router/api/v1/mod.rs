@@ -1,0 +1,68 @@
+// Copyright 2023 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::node::http::state::AppState;
+use axum::Router;
+use axum::response::Redirect;
+use axum::routing::get;
+use nym_node_requests::routes;
+use nym_node_requests::routes::api::v1;
+
+pub mod authenticator;
+pub mod bridges;
+pub mod gateway;
+pub mod health;
+pub mod ip_packet_router;
+pub mod lewes_protocol;
+pub mod load;
+pub mod metrics;
+pub mod mixnode;
+pub mod network;
+pub mod network_requester;
+pub mod node;
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub node: node::Config,
+    pub metrics: metrics::Config,
+    pub gateway: gateway::Config,
+    pub mixnode: mixnode::Config,
+    pub bridges: bridges::Config,
+    pub network_requester: network_requester::Config,
+    pub ip_packet_router: ip_packet_router::Config,
+    pub authenticator: authenticator::Config,
+    pub lewes_protocol: lewes_protocol::Config,
+}
+
+pub(super) fn routes(config: Config) -> Router<AppState> {
+    // legacy redirects: the Swagger UI moved to a version-neutral /api/swagger
+    let swagger_redirect = get(|| async { Redirect::temporary(&routes::api::swagger_absolute()) });
+
+    Router::new()
+        .route(v1::SWAGGER, swagger_redirect.clone())
+        .route(&format!("{}/", v1::SWAGGER), swagger_redirect)
+        .route(v1::HEALTH, get(health::root_health))
+        .route(v1::LOAD, get(load::root_load))
+        .nest(v1::NETWORK, network::routes())
+        .nest(v1::METRICS, metrics::routes(config.metrics))
+        .nest(v1::BRIDGES, bridges::routes(config.bridges))
+        .nest(v1::GATEWAY, gateway::routes(config.gateway))
+        .nest(v1::MIXNODE, mixnode::routes(config.mixnode))
+        .nest(
+            v1::NETWORK_REQUESTER,
+            network_requester::routes(config.network_requester),
+        )
+        .nest(
+            v1::IP_PACKET_ROUTER,
+            ip_packet_router::routes(config.ip_packet_router),
+        )
+        .nest(
+            v1::AUTHENTICATOR,
+            authenticator::routes(config.authenticator),
+        )
+        .nest(
+            v1::LEWES_PROTOCOL,
+            lewes_protocol::routes(config.lewes_protocol),
+        )
+        .merge(node::routes(config.node))
+}

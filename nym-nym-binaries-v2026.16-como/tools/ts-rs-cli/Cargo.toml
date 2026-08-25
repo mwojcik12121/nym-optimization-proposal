@@ -1,0 +1,23 @@
+[package]
+name = "ts-rs-cli"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { workspace = true }
+ts-rs = { workspace = true }
+walkdir = { workspace = true }
+
+nym-validator-client = { workspace = true, features = [
+    "generate-ts"
+] }
+nym-api-requests = { workspace = true, features = ["generate-ts"] }
+nym-mixnet-contract-common = { workspace = true, features = ["generate-ts"] }
+nym-node-families-contract-common = { workspace = true, features = ["generate-ts"] }
+nym-vesting-contract-common = { workspace = true, features = ["generate-ts"] }
+nym-types = { workspace = true, features = ["generate-ts"] }
+nym-wallet-types = { path = "../../nym-wallet/nym-wallet-types", features = ["generate-ts"] }

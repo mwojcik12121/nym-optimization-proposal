@@ -1,0 +1,111 @@
+---
+###############################################################################
+## GLOBAL VARS
+## These values will be used globally unless overwritten per node in inventory/all
+## Set these vars only if you want them globally for all nodes
+## Per node changes in inventory/all will overwrite these global vars
+###############################################################################
+
+## MANDATORY - uncomment & define
+
+## --SSH--
+#ansible_user: root                                  # used for ssh, like `ssh root@nym-exit.ch-1.mynodes.net`
+# ansible_ssh_private_key_file: ~/.ssh/<SSH_KEY>    
+
+## --Operator info--
+# email: "<EMAIL>"                                  # used in certbot, description.toml and landing page
+# website: "<WEBSITE>"                              # it is used in the description.toml
+# description: "<NODE_PUBLIC_DESCRIPTION>"          # or define per node in inventory/all
+# moniker: "<MONIKER>" 
+
+## --Node defaults (can override per node in inventory/all)--
+# accept_operator_terms: true                       # controls --accept-operator-terms-and-conditions, read: https://nym.com/docs/operators/nodes/nym-node/setup#terms--conditions
+# mode: exit-gateway                                # entry-gateway/exit-gateway/mixnode
+# wireguard_enabled: true                           # true/false
+hostname: ""                                        # keep this fallback, keep it and setup hostname per node in inventory/all
+
+## OPTIONAL - uncomment & define
+
+# operator_name: "<OPERATOR_NAME>"          # used in landing page if provided
+# nym_version: "nym-binaries-v2026.7-tola"  # to use particular version instead of Latest, provide in such form: 
+
+## alternative SSH key var setting, instead of a hardcoded path
+## useful if the playbook is shared in a repo by more admins with each having own local key
+# ansible_ssh_private_key_file: "{{ lookup('env', '<YOUR_ANSIBLE SSH_KEY_ENV_VAR>') }}"
+
+###############################################################################
+## GLOBAL PACKAGES & URLs
+## These will be installed during deployment
+###############################################################################
+
+nym_cli_url: "https://github.com/nymtech/nym/releases/download/{{ nym_version }}/nym-cli"
+tunnel_manager_url: "https://github.com/nymtech/nym/raw/refs/heads/develop/scripts/nym-node-setup/network-tunnel-manager.sh"
+quic_bridge_deployment_url: "https://raw.githubusercontent.com/nymtech/nym/refs/heads/develop/scripts/nym-node-setup/quic_bridge_deployment.sh"
+
+packages:
+  - tmux
+  - speedtest-cli
+  - nano
+  - htop
+  - git
+  - zip
+  - nala
+  - curl
+  - neovim
+  - ca-certificates
+  - jq
+  - wget
+  - ufw
+
+
+###############################################################################
+## SYSTEM MAINTENANCE PLAYBOOK KNOBS
+###############################################################################
+
+## JOURNALD LIMITS
+
+# journald_system_max_use: "100M"        # max persistent journal size
+# journald_runtime_max_use: "50M"        # max runtime journal size
+# journald_system_max_file_size: "25M"   # max single journal file
+# journald_runtime_max_file_size: "10M"  # max runtime journal file
+# journald_max_retention_sec: "3day"     # retention time
+
+# journald_rate_limit_interval: "30s"    # rate limit window
+# journald_rate_limit_burst: "1000"      # rate limit burst
+
+
+## NYM-NODE LOG CONTROL
+
+# nymnode_log_level_max: "warning"       # drop INFO logs
+# nymnode_rate_limit_interval: "30s"     # per nym-node rate limit window
+# nymnode_rate_limit_burst: "200"        # per nym-node rate limit burst
+
+
+## JOURNAL VACUUM TARGETS
+
+# journal_vacuum_size: "100M"
+# journal_vacuum_time: "3days"
+
+
+## RSYSLOG
+
+# disable_rsyslog: true
+
+
+## FSTRIM SCHEDULE
+
+# fstrim_every_calendar: "*:0/15"        # Aggressive
+# fstrim_every_calendar: "hourly"        # Less aggressive
+
+
+## OPTIONAL CLEANUPS
+
+# enable_apt_cleanup: true
+# enable_snap_cleanup: true
+
+
+## WRITEBACK TUNING
+
+# enable_writeback_tuning: true
+# writeback_dirty_writeback_centisecs: 1500
+# writeback_dirty_expire_centisecs: 6000

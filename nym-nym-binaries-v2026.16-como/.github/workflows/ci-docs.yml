@@ -1,0 +1,98 @@
+name: ci-docs
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [master]
+    paths:
+      - "documentation/docs/**"
+      - "sdk/typescript/packages/sdk/src/**"
+      - "sdk/typescript/packages/mix-tunnel/src/**"
+      - "sdk/typescript/packages/mix-fetch/src/**"
+      - "sdk/typescript/packages/mix-dns/src/**"
+      - "sdk/typescript/packages/mix-websocket/src/**"
+      - ".github/workflows/ci-docs.yml"
+
+env:
+  S3_ENDPOINT: https://s3.nymte.ch
+  S3_BUCKET: builds
+
+jobs:
+  build:
+    runs-on: arc-linux-latest
+    env:
+      RUSTUP_PERMIT_COPY_RENAME: 1
+    defaults:
+      run:
+        working-directory: documentation/docs
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Dependencies (Linux)
+        run: sudo apt-get update && sudo apt-get install -y build-essential curl wget libssl-dev libudev-dev squashfs-tools protobuf-compiler git python3 && sudo apt-get update --fix-missing
+      - name: Install Python3 modules
+        run: sudo apt install -y python3-pandas python3-tabulate
+      - name: Install rsync
+        run: sudo apt-get install -y rsync
+      - uses: rlespinasse/github-slug-action@v3.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ vars.REQUIRED_RUSTC_VERSION }}
+      - name: Build all binaries
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --workspace --release
+
+      - name: Check if TypeScript SDK source changed
+        id: check-ts-sdk
+        run: |
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -qE '^sdk/typescript/packages/(sdk|mix-tunnel|mix-fetch|mix-dns|mix-websocket)/src/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+        working-directory: ${{ github.workspace }}
+
+      - name: Regenerate TypeDoc API reference
+        if: steps.check-ts-sdk.outputs.changed == 'true'
+        run: |
+          npm install -g typedoc@0.25.13 typedoc-plugin-markdown@4.0.3
+          cd ${{ github.workspace }}/sdk/typescript/packages/sdk          && typedoc --skipErrorChecking
+          cd ${{ github.workspace }}/sdk/typescript/packages/mix-tunnel   && typedoc --skipErrorChecking
+          cd ${{ github.workspace }}/sdk/typescript/packages/mix-fetch    && typedoc --skipErrorChecking
+          cd ${{ github.workspace }}/sdk/typescript/packages/mix-dns      && typedoc --skipErrorChecking
+          cd ${{ github.workspace }}/sdk/typescript/packages/mix-websocket && typedoc --skipErrorChecking
+
+      - name: Verify doc versions
+        run: ${{ github.workspace }}/documentation/scripts/verify-doc-versions.sh
+        working-directory: ${{ github.workspace }}
+      - name: Install project dependencies
+        run: pnpm i
+      - name: Generate llms-full.txt
+        run: pnpm run generate:llms
+      - name: Build project
+        run: pnpm run build
+      - name: Generate sitemap
+        run: npx next-sitemap
+      - name: Move files to /dist/
+        run: ../scripts/move-to-dist.sh
+
+      - name: Publish docs to S3
+        continue-on-error: true
+        uses: ./.github/actions/push-to-s3
+        with:
+          source_path: dist/docs/
+          destination: docs-nextra-${{ env.GITHUB_REF_SLUG }}/
+          args: "--delete --exclude '*/node_modules/*'"
+          endpoint: ${{ env.S3_ENDPOINT }}
+          bucket: ${{ env.S3_BUCKET }}
+          aws_access_key_id: ${{ secrets.GARAGE_AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.GARAGE_AWS_SECRET_ACCESS_KEY }}

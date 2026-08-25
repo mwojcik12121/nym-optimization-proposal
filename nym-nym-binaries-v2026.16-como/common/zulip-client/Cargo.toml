@@ -1,0 +1,32 @@
+[package]
+name = "zulip-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+thiserror = { workspace = true }
+
+itertools = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+zeroize = { workspace = true }
+
+nym-bin-common = { workspace = true }
+nym-http-api-client = { workspace = true }
+reqwest = { workspace = true, features = ["form"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

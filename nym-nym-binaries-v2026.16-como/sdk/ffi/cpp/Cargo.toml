@@ -1,0 +1,31 @@
+[package]
+name = "nym-cpp-ffi"
+description = "C++ FFI bindings for Nym Rust SDK"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[lib]
+name = "nym_cpp_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+# Nym clients, addressing, packet format, common tools (logging), ffi shared
+nym-sdk = { workspace = true }
+nym-bin-common = { workspace = true, features = ["basic_tracing"] }
+nym-sphinx-anonymous-replies = { workspace = true }
+nym-ffi-shared = { workspace = true }
+lazy_static = { workspace = true }
+# error handling
+anyhow = { workspace = true }
+# base58 en/decoding
+bs58 = { workspace = true }

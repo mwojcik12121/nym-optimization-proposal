@@ -1,0 +1,614 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::{
+    clients::{ConnectedClientHandler, ConnectedClients},
+    config::Config,
+    constants::DISCONNECT_TIMER_INTERVAL,
+    error::{IpPacketRouterError, Result},
+    messages::{
+        ClientVersion,
+        request::{
+            ControlRequest, DataRequest, DisconnectRequest, DynamicConnectRequest, HealthRequest,
+            IpPacketRequest, PingRequest,
+        },
+        response::{
+            DisconnectFailureReason, DisconnectResponse, DynamicConnectFailureReason,
+            DynamicConnectSuccess, HealthResponse, InfoLevel, InfoResponse, InfoResponseReply,
+            Response, VersionedResponse,
+        },
+    },
+    request_filter::RequestFilter,
+    util::parse_ip::ParsedPacket,
+};
+use futures::StreamExt;
+use nym_ip_packet_requests::codec::MultiIpPacketCodec;
+use nym_ip_packet_requests::{MAX_NON_STREAM_VERSION, SPHINX_STREAM_VERSION_THRESHOLD};
+use nym_lp_data::packet::frame::{LpFrameHeader, LpFrameKind, SphinxStreamFrameAttributes};
+use nym_sdk::mixnet::MixnetMessageSender;
+use nym_sphinx::receiver::ReconstructedMessage;
+use nym_task::ShutdownToken;
+use std::{net::SocketAddr, time::Duration};
+use tokio::io::AsyncWriteExt;
+use tokio_util::codec::FramedRead;
+
+#[cfg(not(target_os = "linux"))]
+type TunDevice = crate::non_linux_dummy::DummyDevice;
+
+#[cfg(target_os = "linux")]
+type TunDevice = tokio_tun::Tun;
+
+// #[cfg(target_os = "linux")]
+pub(crate) struct MixnetListener {
+    // The configuration for the mixnet listener
+    pub(crate) _config: Config,
+
+    // The request filter that we use to check if a packet should be forwarded
+    pub(crate) request_filter: RequestFilter,
+
+    // The TUN device that we use to send and receive packets from the internet
+    pub(crate) tun_writer: tokio::io::WriteHalf<TunDevice>,
+
+    // The mixnet client that we use to send and receive packets from the mixnet
+    pub(crate) mixnet_client: nym_sdk::mixnet::MixnetClient,
+
+    // The task handle for the main loop
+    pub(crate) shutdown_token: ShutdownToken,
+
+    // The map of connected clients that the mixnet listener keeps track of. It monitors
+    // activity and disconnects clients that have been inactive for too long.
+    pub(crate) connected_clients: ConnectedClients,
+}
+
+// #[cfg(target_os = "linux")]
+impl MixnetListener {
+    async fn handle_packet(
+        &mut self,
+        ip_packet: &[u8],
+        version: ClientVersion,
+    ) -> PacketHandleResult {
+        log::trace!("Received data request");
+
+        // We don't forward packets that we are not able to parse. BUT, there might be a good
+        // reason to still forward them.
+        //
+        // TODO: look into this
+        let ParsedPacket {
+            packet_type,
+            src_addr,
+            dst_addr,
+            dst,
+        } = crate::util::parse_ip::parse_packet(ip_packet)?;
+
+        let dst_str = dst.map_or(dst_addr.to_string(), |dst| dst.to_string());
+        log::debug!("Received packet: {packet_type}: {src_addr} -> {dst_str}");
+
+        if let Some(connected_client) = self.connected_clients.get_client_from_ip_mut(&src_addr) {
+            // Keep track of activity so we can disconnect inactive clients
+            connected_client.update_activity().await;
+
+            // For packets without a port, use 0.
+            let dst = dst.unwrap_or_else(|| SocketAddr::new(dst_addr, 0));
+
+            // Filter check
+            if self.request_filter.check_address(&dst).await {
+                // Forward the packet to the TUN device where it will be routed out to the internet
+                self.tun_writer
+                    .write_all(ip_packet)
+                    .await
+                    .map_err(|_| IpPacketRouterError::FailedToWritePacketToTun)?;
+                Ok(None)
+            } else {
+                log::debug!("Denied filter check: {dst}");
+                Ok(Some(VersionedResponse {
+                    version,
+                    reply_to: connected_client.client_id.clone(),
+                    response: Response::Info {
+                        request_id: 0,
+                        reply: InfoResponse {
+                            reply: InfoResponseReply::ExitPolicyFilterCheckFailed {
+                                dst: dst.to_string(),
+                            },
+                            level: InfoLevel::Warn,
+                        },
+                    },
+                }))
+            }
+        } else {
+            // If the client is not connected, just drop the packet silently
+            log::debug!(
+                "dropping packet from mixnet: no registered client for packet with source: {src_addr}"
+            );
+            Ok(None)
+        }
+    }
+
+    async fn on_data_request(
+        &mut self,
+        data_request: DataRequest,
+    ) -> Result<Vec<PacketHandleResult>> {
+        let mut responses = Vec::new();
+        let decoder = MultiIpPacketCodec::new();
+        let mut framed_reader = FramedRead::new(data_request.ip_packets.as_ref(), decoder);
+
+        while let Some(result) = framed_reader.next().await {
+            match result {
+                Ok(packet) => {
+                    let result = self
+                        .handle_packet(packet.as_bytes(), data_request.version)
+                        .await;
+                    responses.push(result);
+                }
+                Err(e) => {
+                    log::warn!("Failed to decode bundled IP packet: {e}");
+                    continue;
+                }
+            }
+        }
+
+        Ok(responses)
+    }
+
+    fn on_dynamic_connect_request(
+        &mut self,
+        connect_request: DynamicConnectRequest,
+        stream_id: Option<u64>,
+    ) -> PacketHandleResult {
+        log::info!(
+            "Received v{} dynamic connect request from {}",
+            connect_request.version.into_u8(),
+            connect_request.sent_by
+        );
+
+        let version = connect_request.version;
+        let request_id = connect_request.request_id;
+        let reply_to = connect_request.sent_by;
+        let buffer_timeout = connect_request
+            .buffer_timeout
+            .map(Duration::from_millis)
+            .unwrap_or(nym_ip_packet_requests::codec::BUFFER_TIMEOUT);
+
+        if let Some(ips) = self.connected_clients.lookup_ip_from_client_id(&reply_to) {
+            if stream_id.is_some() {
+                // Stream-mode reconnect: tear down old handler (stale stream_id)
+                // and create a fresh one below with the new stream.
+                log::info!("Stream-mode client reconnecting, replacing handler");
+                self.connected_clients.disconnect_client(&reply_to);
+            } else {
+                log::debug!("Reconnecting to the previous session");
+                return Ok(Some(VersionedResponse {
+                    version,
+                    reply_to,
+                    response: Response::DynamicConnect {
+                        request_id,
+                        reply: DynamicConnectSuccess { ips }.into(),
+                    },
+                }));
+            }
+        }
+
+        let Some(new_ips) = self.connected_clients.find_new_ip() else {
+            log::info!("No available IP address");
+            return Ok(Some(VersionedResponse {
+                version,
+                reply_to,
+                response: Response::DynamicConnect {
+                    request_id,
+                    reply: DynamicConnectFailureReason::NoAvailableIp.into(),
+                },
+            }));
+        };
+
+        // Spawn the ConnectedClientHandler for the new client
+        let (forward_from_tun_tx, close_tx, handle) = ConnectedClientHandler::start(
+            reply_to.clone(),
+            buffer_timeout,
+            version,
+            self.mixnet_client.split_sender(),
+            stream_id,
+        );
+
+        // Register the new client in the set of connected clients
+        self.connected_clients.connect(
+            new_ips,
+            reply_to.clone(),
+            forward_from_tun_tx,
+            close_tx,
+            handle,
+        );
+
+        Ok(Some(VersionedResponse {
+            version,
+            reply_to,
+            response: Response::DynamicConnect {
+                request_id,
+                reply: DynamicConnectSuccess { ips: new_ips }.into(),
+            },
+        }))
+    }
+
+    fn on_disconnect_request(
+        &mut self,
+        disconnect_request: DisconnectRequest,
+    ) -> PacketHandleResult {
+        log::info!(
+            "Received disconnect request from {}",
+            disconnect_request.sent_by
+        );
+
+        let version = disconnect_request.version;
+        let request_id = disconnect_request.request_id;
+        let client_id = disconnect_request.sent_by;
+
+        // Check if the client is connected
+        if !self.connected_clients.is_client_connected(&client_id) {
+            log::info!("Client {client_id} is not connected, cannot disconnect");
+            return Ok(Some(VersionedResponse {
+                version,
+                reply_to: client_id,
+                response: Response::Disconnect {
+                    request_id,
+                    reply: DisconnectResponse::Failure(DisconnectFailureReason::ClientNotConnected),
+                },
+            }));
+        }
+
+        // Disconnect the client
+        log::info!("Disconnecting client {client_id}");
+        self.connected_clients.disconnect_client(&client_id);
+
+        Ok(Some(VersionedResponse {
+            version,
+            reply_to: client_id,
+            response: Response::Disconnect {
+                request_id,
+                reply: DisconnectResponse::Success,
+            },
+        }))
+    }
+
+    fn on_ping_request(&self, ping_request: PingRequest) -> PacketHandleResult {
+        Ok(Some(VersionedResponse {
+            version: ping_request.version,
+            reply_to: ping_request.sent_by,
+            response: Response::Pong {
+                request_id: ping_request.request_id,
+            },
+        }))
+    }
+
+    fn on_health_request(&self, health_request: HealthRequest) -> PacketHandleResult {
+        Ok(Some(VersionedResponse {
+            version: health_request.version,
+            reply_to: health_request.sent_by,
+            response: Response::Health {
+                request_id: health_request.request_id,
+                reply: Box::new(HealthResponse {
+                    build_info: nym_bin_common::bin_info_owned!(),
+                    routable: None,
+                }),
+            },
+        }))
+    }
+
+    async fn on_control_request(
+        &mut self,
+        control_request: ControlRequest,
+        stream_id: Option<u64>,
+    ) -> PacketHandleResult {
+        match control_request {
+            ControlRequest::DynamicConnect(r) => self.on_dynamic_connect_request(r, stream_id),
+            ControlRequest::Disconnect(r) => self.on_disconnect_request(r),
+            ControlRequest::Ping(r) => self.on_ping_request(r),
+            ControlRequest::Health(r) => self.on_health_request(r),
+        }
+    }
+
+    fn on_version_mismatch(
+        &self,
+        _version: u8,
+        _reconstructed: &ReconstructedMessage,
+    ) -> PacketHandleResult {
+        // Just drop it. In the future we might want to return a response here, if for example
+        // the client is connecting with a version that is older than the currently supported
+        // ones.
+        Ok(None)
+    }
+
+    async fn on_reconstructed_message(
+        &mut self,
+        reconstructed: ReconstructedMessage,
+    ) -> Result<Vec<PacketHandleResult>> {
+        log::debug!(
+            "Received message with sender_tag: {}",
+            reconstructed
+                .sender_tag
+                .map(|tag| tag.to_string())
+                .unwrap_or("missing".to_owned())
+        );
+
+        // Check if this is an LP Stream frame
+        if reconstructed.message.len() >= LpFrameHeader::SIZE
+            && let Ok(header) = LpFrameHeader::parse(&reconstructed.message)
+            && header.kind == LpFrameKind::SphinxStream
+        {
+            return self.on_stream_frame(reconstructed, header).await;
+        }
+
+        // Regular IPR protocol message (websocket clients)
+        self.on_ipr_message(reconstructed, None).await
+    }
+
+    /// Handle LP Stream-framed messages.
+    ///
+    /// Parses stream attributes, processes the inner IPR payload, and handles
+    /// responses inline (wrapped in LP Stream frames).
+    async fn on_stream_frame(
+        &mut self,
+        reconstructed: ReconstructedMessage,
+        header: LpFrameHeader,
+    ) -> Result<Vec<PacketHandleResult>> {
+        log::debug!(
+            "Received LP Stream frame ({} bytes)",
+            reconstructed.message.len()
+        );
+
+        let attrs = SphinxStreamFrameAttributes::parse(&header.frame_attributes).map_err(|e| {
+            IpPacketRouterError::Other(format!("Invalid stream frame attributes: {e}"))
+        })?;
+
+        let stream_id = attrs.stream_id;
+        log::debug!(
+            "LP Stream: stream_id={stream_id:#018x}, msg_type={:?}, seq={}",
+            attrs.msg_type,
+            attrs.sequence_num
+        );
+
+        let payload = &reconstructed.message[LpFrameHeader::SIZE..];
+
+        // Open frames may carry an empty payload (stream handshake).
+        if payload.is_empty() {
+            log::info!("LP Stream: new stream opened (stream_id={stream_id:#018x})");
+            return Ok(vec![]);
+        }
+
+        let inner_reconstructed = ReconstructedMessage {
+            message: payload.to_vec(),
+            sender_tag: reconstructed.sender_tag,
+        };
+
+        match self
+            .on_ipr_message(inner_reconstructed, Some(stream_id))
+            .await
+        {
+            Ok(results) => {
+                for result in results {
+                    let Ok(Some(response)) = result else { continue };
+                    if let Err(e) = self.handle_stream_response(stream_id, response).await {
+                        log::warn!(
+                            "Error sending LP Stream response for stream_id={stream_id:#018x}: {e}"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Error processing LP Stream inner message: {e}");
+            }
+        }
+
+        Ok(vec![])
+    }
+
+    /// Wrap a response in an LP Stream frame and send it via the mixnet.
+    ///
+    /// Used for inline control responses (connect handshake, pong, health)
+    /// that are sent directly from the message handler — outside the
+    /// `ConnectedClientHandler` which owns the data-path sequence counter.
+    ///
+    /// # Sequence numbering
+    ///
+    /// These inline responses always use **seq=0**. The data-path counter in
+    /// `ConnectedClientHandler` starts at 1 and skips 0 on wrap-around, so
+    /// the two paths never collide.
+    ///
+    /// Limitation: if multiple inline responses are sent on the same stream
+    /// (e.g. connect + later pong), they share seq=0. The client's reorder
+    /// buffer will see the second as a duplicate and drop it. In practice
+    /// this is fine because control responses are rare and idempotent, but
+    /// if it becomes a problem, give inline responses their own counter.
+    async fn handle_stream_response(
+        &mut self,
+        stream_id: u64,
+        response: VersionedResponse,
+    ) -> Result<()> {
+        let reply_to = response.reply_to.clone();
+        let response_bytes = response.try_into_bytes()?;
+
+        let wrapped = crate::clients::encode_stream_frame(stream_id, 0, response_bytes);
+
+        let input_message = crate::util::create_message::create_input_message(&reply_to, wrapped);
+
+        self.mixnet_client.send(input_message).await.map_err(|err| {
+            IpPacketRouterError::FailedToSendPacketToMixnet {
+                source: Box::new(err),
+            }
+        })
+    }
+
+    /// Handle regular IPR protocol messages (from websocket clients).
+    ///
+    /// `stream_id` is `Some` when processing a payload extracted from an LP
+    /// Stream frame, so that connect handlers can thread the id to the
+    /// `ConnectedClientHandler` for LP-wrapping TUN responses.
+    ///
+    /// # Version / transport enforcement
+    ///
+    /// - LP Stream frames (`stream_id` is `Some`) **must** carry payloads with version
+    ///   `>= SPHINX_STREAM_VERSION_THRESHOLD` (see `nym_ip_packet_requests`).
+    /// - Non-stream messages (`stream_id` is `None`) **must** be `<= MAX_NON_STREAM_VERSION`.
+    ///
+    /// Messages that violate these rules are dropped.
+    async fn on_ipr_message(
+        &mut self,
+        reconstructed: ReconstructedMessage,
+        stream_id: Option<u64>,
+    ) -> Result<Vec<PacketHandleResult>> {
+        // First deserialize the request
+        let request = match IpPacketRequest::try_from(&reconstructed) {
+            Err(IpPacketRouterError::InvalidPacketVersion(version)) => {
+                log::debug!("Received packet with invalid version: v{version}");
+                return Ok(vec![self.on_version_mismatch(version, &reconstructed)]);
+            }
+            req => req,
+        }?;
+
+        // Enforce version/transport consistency:
+        // - LP Stream frames must carry payloads at/above the SphinxStream threshold
+        // - Non-stream messages must be at/below the max non-stream version
+        let version_num = request.version().into_u8();
+
+        if stream_id.is_some() && version_num < SPHINX_STREAM_VERSION_THRESHOLD {
+            log::warn!(
+                "LP Stream frame contains v{version_num} payload, expected v{expected}+; dropping",
+                expected = SPHINX_STREAM_VERSION_THRESHOLD
+            );
+            return Ok(vec![]);
+        }
+        if stream_id.is_none() && version_num > MAX_NON_STREAM_VERSION {
+            log::warn!(
+                "Non-stream message claims v{version_num}, expected v{expected} or lower; dropping",
+                expected = MAX_NON_STREAM_VERSION
+            );
+            return Ok(vec![]);
+        }
+
+        log::debug!("Received request: {request}");
+
+        match request {
+            IpPacketRequest::Data(request) => self.on_data_request(request).await,
+            IpPacketRequest::Control(request) => {
+                Ok(vec![self.on_control_request(request, stream_id).await])
+            }
+        }
+    }
+
+    async fn handle_disconnect_timer(&mut self) {
+        let stopped_clients = self.connected_clients.get_finished_client_handlers();
+        let inactive_clients = self.connected_clients.get_inactive_clients().await;
+
+        // TODO: Send disconnect responses to all disconnected clients
+        //for (ip, nym_address) in stopped_clients.iter().chain(disconnected_clients.iter()) {
+        //    let response = IpPacketResponse::new_unrequested_disconnect(...)
+        //    if let Err(err) = self.handle_response(response).await {
+        //        log::error!("Failed to send disconnect response: {err}");
+        //    }
+        //}
+
+        self.connected_clients
+            .disconnect_stopped_client_handlers(stopped_clients);
+        self.connected_clients
+            .disconnect_inactive_clients(inactive_clients);
+    }
+
+    // When an incoming mixnet message triggers a response that we send back, such as during
+    // connect handshake.
+    async fn handle_response(&self, response: VersionedResponse) -> Result<()> {
+        let send_to = response.reply_to.clone();
+        let response_bytes = response.try_into_bytes()?;
+        let input_message =
+            crate::util::create_message::create_input_message(&send_to, response_bytes);
+
+        self.mixnet_client.send(input_message).await.map_err(|err| {
+            IpPacketRouterError::FailedToSendPacketToMixnet {
+                source: Box::new(err),
+            }
+        })
+    }
+
+    // A single incoming request can trigger multiple responses, such as when data requests contain
+    // multiple IP packets.
+    async fn handle_responses(&self, responses: Vec<PacketHandleResult>) {
+        for response in responses {
+            match response {
+                Ok(Some(response)) => {
+                    if let Err(err) = self.handle_response(response).await {
+                        log::error!("Mixnet listener failed to handle response: {err}");
+                    }
+                }
+                Ok(None) => {
+                    continue;
+                }
+                Err(err) => {
+                    log::error!("Error handling mixnet message: {err}");
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn run(mut self) -> Result<()> {
+        let mut disconnect_timer = tokio::time::interval(DISCONNECT_TIMER_INTERVAL);
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.shutdown_token.cancelled() => {
+                    log::debug!("IpPacketRouter [main loop]: received shutdown");
+                    break;
+                },
+                _ = disconnect_timer.tick() => {
+                    self.handle_disconnect_timer().await;
+                },
+                msg = self.mixnet_client.next() => {
+                    if let Some(msg) = msg {
+                        match self.on_reconstructed_message(msg).await {
+                            Ok(responses) => self.handle_responses(responses).await,
+                            Err(err) => {
+                                log::error!("Error handling reconstructed mixnet message: {err}");
+                            }
+
+                        };
+                    } else {
+                        log::trace!("IpPacketRouter [main loop]: stopping since channel closed");
+                        break;
+                    };
+                },
+
+            }
+        }
+        log::debug!("IpPacketRouter: stopping");
+        Ok(())
+    }
+}
+
+pub(crate) type PacketHandleResult = Result<Option<VersionedResponse>>;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_lp_stream_frame_detected() {
+        use bytes::BytesMut;
+        use nym_lp_data::packet::frame::{
+            LpFrameHeader, LpFrameKind, SphinxStreamFrameAttributes, SphinxStreamMsgType,
+        };
+
+        let attrs = SphinxStreamFrameAttributes {
+            stream_id: 0x1234,
+            msg_type: SphinxStreamMsgType::Data,
+            sequence_num: 42,
+        };
+        let frame = nym_lp_data::packet::frame::LpFrame::new_stream(attrs, vec![8, 1, 0]); // fake IPR payload
+        let mut buf = BytesMut::new();
+        frame.encode(&mut buf);
+
+        let header = LpFrameHeader::parse(&buf).unwrap();
+        assert_eq!(header.kind, LpFrameKind::SphinxStream);
+
+        let parsed_attrs = SphinxStreamFrameAttributes::parse(&header.frame_attributes).unwrap();
+        assert_eq!(parsed_attrs.stream_id, 0x1234);
+        assert_eq!(parsed_attrs.msg_type, SphinxStreamMsgType::Data);
+        assert_eq!(parsed_attrs.sequence_num, 42);
+
+        // Content is everything after the header
+        assert_eq!(&buf[LpFrameHeader::SIZE..], &[8, 1, 0]);
+    }
+}

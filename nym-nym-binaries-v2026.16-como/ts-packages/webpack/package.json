@@ -1,0 +1,44 @@
+{
+  "name": "@nymproject/webpack",
+  "description": "Provides default Webpack 5 config and dependencies",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@babel/core": "catalog:",
+    "@babel/plugin-transform-async-to-generator": "catalog:",
+    "@babel/preset-env": "catalog:",
+    "@babel/preset-react": "catalog:",
+    "@babel/preset-typescript": "catalog:",
+    "@svgr/webpack": "catalog:",
+    "babel-loader": "catalog:",
+    "clean-webpack-plugin": "catalog:",
+    "css-loader": "catalog:",
+    "dotenv-webpack": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-plugin-prettier": "catalog:",
+    "favicons": "catalog:",
+    "favicons-webpack-plugin": "catalog:",
+    "file-loader": "catalog:",
+    "fork-ts-checker-webpack-plugin": "catalog:",
+    "html-webpack-plugin": "catalog:",
+    "prettier": "catalog:",
+    "style-loader": "catalog:",
+    "tsconfig-paths-webpack-plugin": "catalog:",
+    "url-loader": "catalog:",
+    "webpack": "catalog:",
+    "webpack-cli": "catalog:",
+    "webpack-dev-server": "catalog:",
+    "webpack-favicons": "catalog:",
+    "webpack-merge": "catalog:"
+  },
+  "scripts": {
+    "lint": "eslint *.js",
+    "lint:fix": "eslint *.js --fix"
+  }
+}

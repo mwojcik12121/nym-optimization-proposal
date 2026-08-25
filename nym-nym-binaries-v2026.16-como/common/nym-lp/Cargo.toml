@@ -1,0 +1,54 @@
+[package]
+name = "nym-lp"
+description = "Lewes Protocol session and transport layer for the Nym network"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+thiserror = { workspace = true }
+bs58 = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+rand010 = { workspace = true }
+getrandom04 = { workspace = true }
+tls_codec = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util"] }
+
+nym-crypto = { workspace = true, features = ["hashing"] }
+nym-common.workspace = true
+nym-kkt = { workspace = true }
+nym-kkt-ciphersuite = { workspace = true }
+nym-lp-data.workspace = true
+
+# libcrux dependencies for PSQ (Post-Quantum PSK derivation)
+libcrux-psq = { workspace = true }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
+
+
+# needed for the 'mock 'feature
+nym-test-utils = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+nym-test-utils = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+
+[features]
+mock = ["nym-test-utils"]
+
+[[bench]]
+name = "replay_protection"
+harness = false
+
+[lints]
+workspace = true

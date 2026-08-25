@@ -1,0 +1,45 @@
+[package]
+name = "nym-registration-client"
+description = "Crate for dealing with Mixnet and Wireguard registration between Nym clients and Gateways"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bincode.workspace = true
+bytes.workspace = true
+futures.workspace = true
+rand010.workspace = true
+getrandom04.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+typed-builder.workspace = true
+
+nym-authenticator-client = { workspace = true }
+nym-bandwidth-controller = { workspace = true }
+nym-credential-storage = { workspace = true }
+nym-credentials-interface = { workspace = true }
+nym-crypto = { workspace = true, features = ["asymmetric", "libcrux_x25519"] }
+nym-ip-packet-client = { workspace = true }
+nym-lp = { workspace = true }
+nym-lp-data.workspace = true
+nym-registration-common = { workspace = true }
+nym-sdk = { workspace = true }
+nym-wireguard-types = { workspace = true }
+
+[dev-dependencies]
+nym-kkt.workspace = true
+nym-test-utils.workspace = true

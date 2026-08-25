@@ -1,0 +1,31 @@
+[package]
+name = "nym-ecash-signer-check"
+description = "Functions to interact with zknym signers, checking their status and health"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+futures = { workspace = true }
+thiserror = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+url = { workspace = true }
+
+
+nym-validator-client = { workspace = true, features = ["http-client"] }
+nym-network-defaults = { workspace = true }
+nym-ecash-signer-check-types = { workspace = true }
+nym-http-api-client = { workspace = true }
+
+[lints]
+workspace = true

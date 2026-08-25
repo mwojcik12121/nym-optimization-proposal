@@ -1,0 +1,49 @@
+[package]
+name = "nym-coconut-dkg"
+version = "0.1.0"
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "schema"
+required-features = ["schema-gen"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nym-coconut-dkg-common = { workspace = true }
+nym-contracts-common = { workspace = true }
+nym-contracts-common-testing = { workspace = true, optional = true }
+nym-group-contract-common = { workspace = true, optional = true }
+
+cosmwasm-schema = { workspace = true, optional = true }
+cosmwasm-std = { workspace = true }
+
+cw-storage-plus = { workspace = true }
+cw-controllers = { workspace = true }
+cw2 = { workspace = true }
+cw4 = { workspace = true }
+thiserror = { workspace = true }
+
+cw3-flex-multisig = { workspace = true, features = ["testable-cw3-contract"], optional = true }
+cw4-group = { workspace = true, features = ["testable-cw4-contract"], optional = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+easy-addr = { workspace = true }
+nym-group-contract-common = { workspace = true }
+cw-multi-test = { workspace = true }
+cw4-group = { workspace = true }
+
+[features]
+schema-gen = ["nym-coconut-dkg-common/schema", "cosmwasm-schema"]
+testable-dkg-contract = ["nym-contracts-common-testing", "cw3-flex-multisig/testable-cw3-contract", "nym-group-contract-common", "cw4-group/testable-cw4-contract"]
+
+[lints]
+workspace = true

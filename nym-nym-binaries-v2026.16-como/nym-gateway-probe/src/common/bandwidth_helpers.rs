@@ -1,0 +1,234 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: Apache-2.0
+
+use anyhow::bail;
+use nym_bandwidth_controller::BandwidthTicketProvider;
+use nym_bandwidth_controller::mock::MockBandwidthController;
+use nym_client_core::client::base_client::storage::OnDiskPersistent;
+use nym_credentials::{
+    AggregatedCoinIndicesSignatures, AggregatedExpirationDateSignatures, EpochVerificationKey,
+    Error as CredentialsError, IssuedTicketBook,
+};
+use nym_credentials_interface::TicketType;
+use nym_sdk::NymNetworkDetails;
+use nym_sdk::bandwidth::BandwidthImporter;
+use nym_sdk::mixnet::{CredentialStorage, DisconnectedMixnetClient, EphemeralCredentialStorage};
+use nym_validator_client::nyxd::error::NyxdError;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{error, info};
+
+pub use nym_credentials::ecash::bandwidth::serialiser::{VersionSerialised, VersionedSerialise};
+
+pub(crate) fn build_bandwidth_controller<S>(
+    network: &NymNetworkDetails,
+    storage: S,
+    use_mock_ecash: bool,
+) -> anyhow::Result<Box<dyn BandwidthTicketProvider>>
+where
+    S: CredentialStorage + 'static,
+{
+    if !use_mock_ecash {
+        // the controller owns the storage; it fetches any missing global ecash data from the
+        // nym-apis via a nyxd-backed public data fetcher.
+        let config = nym_validator_client::nyxd::Config::try_from_nym_network_details(network)?;
+        let nyxd_url = network
+            .endpoints
+            .first()
+            .map(|ep| ep.nyxd_url())
+            .ok_or(anyhow::anyhow!("missing nyxd url"))?;
+        let rpc_client =
+            nym_validator_client::nyxd::NyxdClient::connect(config, nyxd_url.as_str())?;
+
+        Ok(Box::new(
+            nym_bandwidth_controller::BandwidthController::new(storage)
+                .with_credential_public_data_fetcher(
+                    nym_bandwidth_fetcher::NyxdGlobalDataFetcher::new(Arc::new(rpc_client)),
+                ),
+        ))
+    } else {
+        Ok(Box::new(MockBandwidthController::default()))
+    }
+}
+
+pub(crate) async fn import_bandwidth(
+    bandwidth_importer: BandwidthImporter<'_, EphemeralCredentialStorage>,
+    attached_ticket_materials: AttachedTicketMaterials,
+) -> anyhow::Result<()> {
+    // 1. import all auxiliary data
+    for master_vk in attached_ticket_materials.master_verification_keys {
+        let key = master_vk.try_unpack()?;
+        info!(
+            "importing master verification key for epoch {}",
+            key.epoch_id
+        );
+        bandwidth_importer
+            .import_master_verification_key(&key)
+            .await?;
+    }
+    for coin_index_signatures in attached_ticket_materials.coin_indices_signatures {
+        let sigs = coin_index_signatures.try_unpack()?;
+        info!("importing coin index signatures epoch {}", sigs.epoch_id);
+        bandwidth_importer
+            .import_coin_index_signatures(&sigs)
+            .await?;
+    }
+    for expiration_date_signatures in attached_ticket_materials.expiration_date_signatures {
+        let sigs = expiration_date_signatures.try_unpack()?;
+        info!(
+            "importing expiration date signatures epoch {} and expiration {}",
+            sigs.epoch_id, sigs.expiration_date
+        );
+        bandwidth_importer
+            .import_expiration_date_signatures(&sigs)
+            .await?;
+    }
+
+    // 2. import actual tickets
+    for ticket in attached_ticket_materials.attached_tickets {
+        let ticketbook = ticket.ticketbook.try_unpack()?;
+        let total = ticketbook.params_total_tickets();
+        if ticket.usable_index as u64 >= total {
+            error!(
+                "⚠️ received usable_index {} >= params_total_tickets {} for {}. \
+                 This ticket is unusable: spending will fail with SpendExceedsAllowance.",
+                ticket.usable_index,
+                total,
+                ticketbook.ticketbook_type()
+            );
+        }
+        info!(
+            "importing partial ticketbook {}. index to use: {}, params_total_tickets: {}",
+            ticketbook.ticketbook_type(),
+            ticket.usable_index,
+            total,
+        );
+        bandwidth_importer
+            .import_partial_ticketbook(&ticketbook, ticket.usable_index, ticket.usable_index)
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Walks the error's source chain looking for an underlying nyxd error, wherever it's wrapped.
+fn find_nyxd_error<'a>(err: &'a (dyn std::error::Error + 'static)) -> Option<&'a NyxdError> {
+    let mut current = Some(err);
+    while let Some(source) = current {
+        if let Some(nyxd) = source.downcast_ref::<NyxdError>() {
+            return Some(nyxd);
+        }
+        current = source.source();
+    }
+    None
+}
+
+/// Whether a nyxd error is an account-sequence mismatch. The log has to be string-matched since it
+/// originates from the go nyxd binary.
+fn is_account_sequence_mismatch(err: &NyxdError) -> bool {
+    match err {
+        // happens when sequence issue occurs during tx delivery
+        NyxdError::BroadcastTxErrorDeliverTx { raw_log, .. } => {
+            raw_log.contains("account sequence mismatch")
+        }
+        // happens when sequence issue occurs during tx simulate
+        NyxdError::AbciError { log, .. } => log.contains("account sequence mismatch"),
+        _ => false,
+    }
+}
+
+pub(crate) async fn acquire_bandwidth(
+    mnemonic: &str,
+    disconnected_mixnet_client: &DisconnectedMixnetClient<OnDiskPersistent>,
+    ticketbook_type: TicketType,
+) -> anyhow::Result<()> {
+    // TODO: make it configurable
+    const MAX_RETRIES: usize = 50;
+    for i in 0..MAX_RETRIES {
+        let attempt = i + 1; // since humans usually don't count from 0 in this instance
+        info!(
+            "attempt {attempt}/{MAX_RETRIES} for attempting to acquire {ticketbook_type} bandwidth"
+        );
+        let bw_client = disconnected_mixnet_client
+            .create_bandwidth_client(mnemonic.to_string(), ticketbook_type)
+            .await?;
+        info!("Calling bandwidth controller acquire() for {ticketbook_type}");
+        match bw_client.acquire().await {
+            Ok(_) => {
+                if i > 0 {
+                    info!(
+                        "managed to acquire {ticketbook_type} bandwidth after {attempt} attempts",
+                    );
+                }
+                return Ok(());
+            }
+            Err(err) => match find_nyxd_error(&err) {
+                Some(nyxd) if is_account_sequence_mismatch(nyxd) => error!(
+                    "another process is using the same mnemonic; a transaction failed due to a mismatched account sequence - retrying"
+                ),
+                _ => return Err(err.into()),
+            },
+        }
+
+        // add a bit of backoff as if the rpc node is slightly out of sync,
+        // we might use our retry budget for abci queries to the simulate endpoint
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    bail!("failed to acquire bandwidth after {MAX_RETRIES} attempts")
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AttachedTicket {
+    pub ticketbook: VersionSerialised<IssuedTicketBook>,
+    pub usable_index: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AttachedTicketMaterials {
+    pub coin_indices_signatures: Vec<VersionSerialised<AggregatedCoinIndicesSignatures>>,
+
+    pub expiration_date_signatures: Vec<VersionSerialised<AggregatedExpirationDateSignatures>>,
+
+    pub master_verification_keys: Vec<VersionSerialised<EpochVerificationKey>>,
+
+    // two V1WireguardEntry tickets needed: one for WG registration, one for LP registration
+    pub attached_tickets: Vec<AttachedTicket>,
+}
+
+impl AttachedTicketMaterials {
+    pub fn to_serialised_string(&self) -> String {
+        // TODO: we're losing revision here, but given we control both ends of the pipeline,
+        // that's fine. we can just pass it as a separate argument
+        let serialised = self.pack();
+        bs58::encode(serialised.data).into_string()
+    }
+
+    pub fn from_serialised_string(raw: String, revision: u8) -> Result<Self, CredentialsError> {
+        let bytes = bs58::decode(raw)
+            .into_vec()
+            .inspect_err(|err| error!("malformed bytes encoding: {err}"))
+            .unwrap_or_default();
+        Self::try_unpack(&bytes, revision)
+    }
+}
+
+impl VersionedSerialise for AttachedTicketMaterials {
+    const CURRENT_SERIALISATION_REVISION: u8 = 1;
+
+    fn try_unpack(b: &[u8], revision: impl Into<Option<u8>>) -> Result<Self, CredentialsError>
+    where
+        Self: DeserializeOwned,
+    {
+        let revision = revision
+            .into()
+            .unwrap_or(<Self as VersionedSerialise>::CURRENT_SERIALISATION_REVISION);
+
+        match revision {
+            1 => Self::try_unpack_current(b),
+            _ => Err(CredentialsError::UnknownSerializationRevision { revision }),
+        }
+    }
+}

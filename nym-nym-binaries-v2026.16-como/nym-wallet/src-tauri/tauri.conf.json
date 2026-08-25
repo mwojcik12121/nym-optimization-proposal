@@ -1,0 +1,91 @@
+{
+  "bundle": {
+    "active": true,
+    "windows": {
+      "certificateThumbprint": "6DB77B1F529A0804FE0E6843A3EB8A8CECFFD408",
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.comodoca.com"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "externalBin": [],
+    "copyright": "Copyright © 2021-2026 Nym Technologies SA",
+    "category": "Business",
+    "shortDescription": "Nym desktop wallet allows you to manage your NYM tokens",
+    "longDescription": "",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "15.3.2",
+      "exceptionDomain": "",
+      "signingIdentity": "Developer ID Application: Nym Technologies SA (VW5DZLFHM5)",
+      "entitlements": null
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      },
+      "deb": {
+        "depends": []
+      }
+    },
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "build": {
+    "beforeBuildCommand": "",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "",
+    "devUrl": "http://localhost:9000"
+  },
+  "productName": "NymWallet",
+  "mainBinaryName": "NymWallet",
+  "version": "1.2.24",
+  "identifier": "net.nymtech.wallet",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENCNzQ2M0E5N0VFODE2NApSV1JrZ2U2WE9rYTNETTg1OTBKdE5uWUEra0hML2syOVUvQ2lxZmFZRzZ1T3NWbGM0eVRzUTVhVwo=",
+      "endpoints": [
+        "https://nymtech.net/.wellknown/wallet/updater.json"
+      ]
+    }
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        "main-capability"
+      ],
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ],
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "script-src": "'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+        "style-src": "'unsafe-inline' 'self' https://fonts.googleapis.com",
+        "img-src": "'self' asset: http://asset.localhost https://asset.localhost blob: data:",
+        "font-src": "'self' data: https://fonts.gstatic.com",
+        "connect-src": "ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:* http: https: ws: wss:",
+        "media-src": "'self' blob: data:",
+        "worker-src": "'self' blob:",
+        "frame-src": "'none'",
+        "object-src": "'none'",
+        "base-uri": "'self'"
+      }
+    },
+    "windows": [
+      {
+        "title": "Nym Wallet",
+        "width": 1268,
+        "height": 768,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "useHttpsScheme": true,
+        "backgroundColor": "#242b2d"
+      }
+    ]
+  }
+}

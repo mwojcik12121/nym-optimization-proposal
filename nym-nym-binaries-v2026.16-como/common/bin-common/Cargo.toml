@@ -1,0 +1,57 @@
+[package]
+name = "nym-bin-common"
+description = "Common code for nym binaries"
+version.workspace = true
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive"], optional = true }
+clap_complete = { workspace = true, optional = true }
+clap_complete_fig = { workspace = true, optional = true }
+const-str = { workspace = true }
+log = { workspace = true }
+schemars = { workspace = true, features = ["preserve_order"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+
+## tracing
+tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
+tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
+opentelemetry = { workspace = true, features = ["trace"], optional = true }
+
+## otel-otlp (modern OTLP export to SigNoz/any OTLP collector)
+opentelemetry_sdk = { workspace = true, features = ["trace"], optional = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "trace", "tls-roots"], optional = true }
+tonic = { workspace = true, optional = true }
+
+
+[build-dependencies]
+vergen = { workspace = true, features = ["build", "git", "gitcl", "rustc", "cargo"] }
+
+[features]
+default = []
+openapi = ["utoipa"]
+output_format = ["serde_json", "dep:clap"]
+bin_info_schema = ["schemars"]
+ip_check = []
+basic_tracing = ["dep:tracing", "dep:tracing-subscriber"]
+otel-otlp = [
+    "basic_tracing",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tonic",
+]
+clap = ["dep:clap", "dep:clap_complete", "dep:clap_complete_fig"]
+models = []

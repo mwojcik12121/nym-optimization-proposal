@@ -1,0 +1,30 @@
+[package]
+name = "nym-credentials-interface"
+description = "Interface for Nym's compact eacash / zknym credential scheme"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nym-bls12_381-fork = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+strum = { workspace = true, features = ["derive"] }
+strum_macros = { workspace = true }
+time = { workspace = true, features = ["serde"] }
+utoipa = { workspace = true }
+rand = { workspace = true }
+
+nym-compact-ecash = { workspace = true }
+nym-ecash-time = { workspace = true }
+nym-network-defaults = { workspace = true }
+nym-upgrade-mode-check = { workspace = true }

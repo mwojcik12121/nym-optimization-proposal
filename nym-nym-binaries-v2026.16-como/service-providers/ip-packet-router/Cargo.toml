@@ -1,0 +1,55 @@
+[package]
+name = "nym-ip-packet-router"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+bincode = { workspace = true }
+bs58 = { workspace = true }
+bytes = { workspace = true }
+clap.workspace = true
+etherparse = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+
+nym-bin-common = { workspace = true, features = ["clap", "basic_tracing", "ip_check"] }
+nym-client-core = { workspace = true }
+nym-config = { workspace = true }
+nym-crypto = { workspace = true }
+nym-exit-policy = { workspace = true }
+nym-id = { workspace = true }
+nym-ip-packet-requests = { workspace = true }
+nym-lp-data = { workspace = true }
+nym-network-defaults = { workspace = true }
+nym-network-requester = { path = "../network-requester" }
+nym-sdk = { workspace = true }
+nym-service-provider-requests-common = { workspace = true }
+nym-service-providers-common = { workspace = true }
+nym-sphinx = { workspace = true }
+nym-task = { workspace = true }
+nym-tun = { workspace = true }
+nym-types = { workspace = true }
+nym-wireguard = { workspace = true }
+nym-wireguard-types = { workspace = true }
+rand = { workspace = true }
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros"] }
+tokio-util = { workspace = true, features = ["codec"] }
+url.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-tun.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true

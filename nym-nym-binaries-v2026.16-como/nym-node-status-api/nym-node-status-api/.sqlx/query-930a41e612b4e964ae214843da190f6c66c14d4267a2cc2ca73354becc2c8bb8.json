@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            gateway_identity_key as \"gateway_identity_key!\",\n            bonded as \"bonded: bool\"\n         FROM gateways\n         ORDER BY last_testrun_utc",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "gateway_identity_key!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "bonded: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "930a41e612b4e964ae214843da190f6c66c14d4267a2cc2ca73354becc2c8bb8"
+}

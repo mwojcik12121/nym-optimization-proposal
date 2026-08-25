@@ -1,0 +1,48 @@
+# Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: GPL-3.0-only
+
+[package]
+name = "nyx-chain-watcher"
+version = "0.1.15"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait.workspace = true
+axum = { workspace = true, features = ["tokio"] }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+nym-config = { workspace = true }
+nym-bin-common = { workspace = true, features = ["output_format"] }
+nym-network-defaults = { workspace = true }
+nym-task = { workspace = true }
+nym-validator-client = { workspace = true }
+nyxd-scraper-sqlite = { path = "../common/nyxd-scraper-sqlite" }
+reqwest = { workspace = true, features = ["rustls"] }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "sqlite", "time"] }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+utoipa = { workspace = true, features = ["axum_extras", "time"] }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+utoipauto = { workspace = true }
+
+
+[build-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "sqlite"] }

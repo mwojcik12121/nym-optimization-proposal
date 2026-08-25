@@ -1,0 +1,66 @@
+# EXAMPLE USAGE:
+#
+#   Refer for explanation to following link:
+#   https://lefthook.dev/configuration/
+#
+# pre-push:
+#   jobs:
+#     - name: packages audit
+#       tags:
+#         - frontend
+#         - security
+#       run: yarn audit
+#
+#     - name: gems audit
+#       tags:
+#         - backend
+#         - security
+#       run: bundle audit
+#
+# pre-commit:
+#   parallel: true
+#   jobs:
+#     - run: yarn eslint {staged_files}
+#       glob: "*.{js,ts,jsx,tsx}"
+#
+#     - name: rubocop
+#       glob: "*.rb"
+#       exclude:
+#         - config/application.rb
+#         - config/routes.rb
+#       run: bundle exec rubocop --force-exclusion {all_files}
+#
+#     - name: govet
+#       files: git ls-files -m
+#       glob: "*.go"
+#       run: go vet {files}
+#
+#     - script: "hello.js"
+#       runner: node
+#
+#     - script: "hello.go"
+#       runner: go run
+pre-commit:
+  commands:
+    check:
+      root: "explorer-v2/"
+      glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}"
+      run: pnpm biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
+      stage_fixed: true
+    rust-lint:
+      glob: "*.rs"
+      run: |
+        if [ -f "${HOME}/.cargo/env" ]; then
+          # shellcheck source=/dev/null
+          . "${HOME}/.cargo/env"
+        fi
+        export PATH="${HOME}/.cargo/bin:${PATH}"
+        if ! command -v cargo >/dev/null 2>&1; then
+          echo "lefthook rust-lint: cargo not found (install Rust or ensure ~/.cargo/bin is on PATH); skipping." >&2
+          exit 0
+        fi
+        cargo fmt --all
+      stage_fixed: true
+    cargo-toml-order:
+      glob: "**/Cargo.toml"
+      run: python3 tools/internal/check_cargo_toml_field_order.py {staged_files}

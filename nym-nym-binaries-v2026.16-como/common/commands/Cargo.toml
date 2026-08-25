@@ -1,0 +1,72 @@
+[package]
+name = "nym-cli-commands"
+description = "Common commands crate used by the nym-cli tool for interacting with the Nyx Cosmos SDK blockchain and Mixnet endpoints"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+publish = true
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+bip39 = { workspace = true }
+bs58 = { workspace = true }
+colored = { workspace = true }
+comfy-table = { workspace = true }
+cfg-if = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+csv = { workspace = true }
+cw-utils = { workspace = true }
+futures = { workspace = true }
+handlebars = { workspace = true }
+humantime-serde = { workspace = true }
+inquire = { workspace = true }
+k256 = { workspace = true, features = ["ecdsa", "sha256"] }
+log = { workspace = true }
+rand = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true, features = ["parsing", "formatting"] }
+tokio = { workspace = true, features = ["sync"] }
+toml = { workspace = true }
+url = { workspace = true }
+tap = { workspace = true }
+zeroize = { workspace = true }
+
+cosmrs = { workspace = true }
+cosmwasm-std = { workspace = true }
+
+nym-validator-client = { workspace = true }
+nym-http-api-client = { workspace = true }
+nym-bin-common = { workspace = true, features = ["output_format"] }
+nym-crypto = { workspace = true, features = ["asymmetric"] }
+nym-network-defaults = { workspace = true }
+nym-contracts-common = { workspace = true }
+nym-bandwidth-controller = { workspace = true }
+nym-bandwidth-fetcher = { workspace = true, features = ["recovery"] }
+nym-mixnet-contract-common = { workspace = true }
+nym-vesting-contract-common = { workspace = true }
+nym-coconut-dkg-common = { workspace = true }
+nym-multisig-contract-common = { workspace = true }
+nym-ecash-contract-common = { workspace = true }
+nym-ecash-time = { workspace = true }
+nym-sphinx = { workspace = true }
+nym-client-core = { workspace = true }
+nym-config = { workspace = true }
+nym-credentials = { workspace = true }
+nym-credentials-interface = { workspace = true }
+nym-credential-storage = { workspace = true, features = ["persistent-storage"] }
+nym-id = { workspace = true }
+nym-credential-proxy-requests = { workspace = true }
+
+nym-pemstore = { workspace = true }
+nym-types = { workspace = true }

@@ -1,0 +1,348 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::contract::{execute, instantiate, migrate, query};
+use crate::storage::NYM_PERFORMANCE_CONTRACT_STORAGE;
+use cosmwasm_std::testing::{mock_env, MockApi};
+use cosmwasm_std::{
+    coin, Addr, ContractInfo, Deps, DepsMut, Env, QuerierWrapper, StdError, StdResult,
+};
+use mixnet_contract::testable_mixnet_contract::{EmbeddedMixnetContractExt, MixnetContract};
+use node_families_contract::testing::NodeFamiliesContract;
+use nym_contracts_common::Percent;
+use nym_contracts_common_testing::{
+    addr, AdminExt, ArbitraryContractStorageReader, ArbitraryContractStorageWriter, BankExt,
+    ChainOpts, CommonStorageKeys, ContractFn, ContractOpts, ContractStorageWrapper, ContractTester,
+    ContractTesterBuilder, DenomExt, PermissionedFn, QueryFn, RandExt, TestableNymContract,
+    TEST_DENOM,
+};
+use nym_mixnet_contract_common::{ContractState, EpochId};
+use nym_node_families_contract_common::{
+    Config as NodeFamiliesConfig, InstantiateMsg as NodeFamiliesInstantiateMsg,
+};
+use nym_performance_contract_common::constants::storage_keys;
+use nym_performance_contract_common::{
+    ExecuteMsg, InstantiateMsg, MigrateMsg, NodeId, NodePerformance, NodeResults,
+    NymPerformanceContractError, QueryMsg,
+};
+use serde::Serialize;
+use std::str::FromStr;
+
+pub struct PerformanceContract;
+
+impl TestableNymContract for PerformanceContract {
+    const NAME: &'static str = "performance-contract";
+    type InitMsg = InstantiateMsg;
+    type ExecuteMsg = ExecuteMsg;
+    type QueryMsg = QueryMsg;
+    type MigrateMsg = MigrateMsg;
+    type ContractError = NymPerformanceContractError;
+
+    fn instantiate() -> ContractFn<Self::InitMsg, Self::ContractError> {
+        instantiate
+    }
+
+    fn execute() -> ContractFn<Self::ExecuteMsg, Self::ContractError> {
+        execute
+    }
+
+    fn query() -> QueryFn<Self::QueryMsg, Self::ContractError> {
+        query
+    }
+
+    fn migrate() -> PermissionedFn<Self::MigrateMsg, Self::ContractError> {
+        migrate
+    }
+
+    fn base_init_msg() -> Self::InitMsg {
+        InstantiateMsg {
+            mixnet_contract_address: addr("mixnet-contract").to_string(),
+            authorised_network_monitors: vec![],
+        }
+    }
+
+    fn init() -> ContractTester<Self>
+    where
+        Self: Sized,
+    {
+        let builder = ContractTesterBuilder::new().instantiate::<MixnetContract>(None);
+
+        // we just instantiated it
+        let mixnet_address = builder
+            .well_known_contracts
+            .get(MixnetContract::NAME)
+            .unwrap()
+            .clone();
+
+        // The embedded mixnet's `try_remove_nym_node` always emits an
+        // `OnNymNodeUnbond` WasmMsg to the configured families contract;
+        // instantiate one alongside so that target exists and accepts the call.
+        // `init_contract_tester` patches the mixnet's stored families address
+        // to point at this instance after the build completes.
+        let builder =
+            builder.instantiate::<NodeFamiliesContract>(Some(NodeFamiliesInstantiateMsg {
+                config: NodeFamiliesConfig {
+                    create_family_fee: coin(100_000000, TEST_DENOM),
+                    family_name_length_limit: 20,
+                    family_description_length_limit: 200,
+                    default_invitation_validity_secs: 24 * 60 * 60,
+                },
+                mixnet_contract_address: mixnet_address.to_string(),
+            }));
+
+        builder
+            .instantiate::<Self>(Some(InstantiateMsg {
+                mixnet_contract_address: mixnet_address.to_string(),
+                authorised_network_monitors: vec![],
+            }))
+            .build()
+    }
+}
+
+/// Storage key the mixnet contract uses for its `ContractState` `Item`
+/// (mirrors `mixnet/src/constants.rs::CONTRACT_STATE_KEY`).
+const MIXNET_CONTRACT_STATE_STORAGE_KEY: &str = "state";
+
+pub fn init_contract_tester() -> ContractTester<PerformanceContract> {
+    let mut tester = PerformanceContract::init()
+        .with_common_storage_key(CommonStorageKeys::Admin, storage_keys::CONTRACT_ADMIN);
+
+    // Chicken-and-egg: the mixnet contract was instantiated first with a
+    // placeholder `node_families_contract_address`. Now that the families
+    // contract exists, patch the mixnet's `ContractState` so its
+    // `OnNymNodeUnbond` dispatch lands on the real contract instead of the
+    // placeholder. In production this fixup happens via a contract migration;
+    // here we go straight to storage to avoid the cw2 version check that
+    // blocks migrating a freshly-instantiated contract.
+    let families_address = tester
+        .well_known_contracts
+        .get(NodeFamiliesContract::NAME)
+        .expect("families contract should have been instantiated")
+        .clone();
+    let mut mixnet_state: ContractState = tester
+        .read_from_mixnet_contract_storage(MIXNET_CONTRACT_STATE_STORAGE_KEY)
+        .expect("mixnet contract state should be loadable");
+    mixnet_state.node_families_contract_address = families_address;
+    tester
+        .write_to_mixnet_contract_storage_value(MIXNET_CONTRACT_STATE_STORAGE_KEY, &mixnet_state)
+        .expect("should be able to patch mixnet contract state");
+
+    tester
+}
+
+// we need to be able to test instantiation, but for that we require
+// deps in a state that already includes instantiated mixnet contract
+pub(crate) struct PreInitContract {
+    tester_builder: ContractTesterBuilder<PerformanceContract>,
+    pub(crate) mixnet_contract_address: Addr,
+    pub(crate) api: MockApi,
+    storage: ContractStorageWrapper,
+    placeholder_address: Addr,
+}
+
+#[allow(dead_code)]
+impl PreInitContract {
+    pub(crate) fn new() -> PreInitContract {
+        let tester_builder =
+            ContractTesterBuilder::<PerformanceContract>::new().instantiate::<MixnetContract>(None);
+
+        let mixnet_contract = tester_builder
+            .well_known_contracts
+            .get(&MixnetContract::NAME)
+            .unwrap();
+
+        let api = tester_builder.api();
+        let placeholder_address = api.addr_make("to-be-performance-contract");
+
+        let storage = tester_builder.contract_storage_wrapper(&placeholder_address);
+
+        PreInitContract {
+            mixnet_contract_address: mixnet_contract.clone(),
+            tester_builder,
+            api,
+            storage,
+            placeholder_address,
+        }
+    }
+
+    pub(crate) fn deps(&self) -> Deps<'_> {
+        Deps {
+            storage: &self.storage,
+            api: &self.api,
+            querier: self.tester_builder.querier(),
+        }
+    }
+
+    pub(crate) fn deps_mut(&mut self) -> DepsMut<'_> {
+        DepsMut {
+            storage: &mut self.storage,
+            api: &self.api,
+            querier: self.tester_builder.querier(),
+        }
+    }
+
+    pub(crate) fn querier(&self) -> QuerierWrapper<'_> {
+        self.tester_builder.querier()
+    }
+
+    pub(crate) fn env(&self) -> Env {
+        Env {
+            contract: ContractInfo {
+                address: self.placeholder_address.clone(),
+            },
+            ..mock_env()
+        }
+    }
+
+    pub(crate) fn addr_make(&self, input: &str) -> Addr {
+        self.api.addr_make(input)
+    }
+
+    pub(crate) fn write_to_mixnet_contract_storage(
+        &mut self,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> StdResult<()> {
+        let address = NYM_PERFORMANCE_CONTRACT_STORAGE
+            .mixnet_contract_address
+            .load(self.deps().storage)?;
+
+        self.set_contract_storage(address, key, value);
+        Ok(())
+    }
+
+    pub(crate) fn write_to_mixnet_contract_storage_value<T: Serialize>(
+        &mut self,
+        key: impl AsRef<[u8]>,
+        value: &T,
+    ) -> StdResult<()> {
+        let address = NYM_PERFORMANCE_CONTRACT_STORAGE
+            .mixnet_contract_address
+            .load(self.deps().storage)?;
+
+        self.set_contract_storage_value(address, key, value)
+    }
+}
+
+impl ArbitraryContractStorageWriter for PreInitContract {
+    fn set_contract_storage(
+        &mut self,
+        address: impl Into<String>,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) {
+        self.storage
+            .as_inner_storage_mut()
+            .set_contract_storage(address, key, value);
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) trait PerformanceContractTesterExt:
+    ContractOpts<
+        ExecuteMsg = ExecuteMsg,
+        QueryMsg = QueryMsg,
+        ContractError = NymPerformanceContractError,
+    > + ChainOpts
+    + AdminExt
+    + DenomExt
+    + RandExt
+    + BankExt
+    + ArbitraryContractStorageReader
+    + ArbitraryContractStorageWriter
+    + EmbeddedMixnetContractExt
+{
+    fn authorise_network_monitor(
+        &mut self,
+        addr: &Addr,
+    ) -> Result<(), NymPerformanceContractError> {
+        let admin = self.admin_unchecked();
+        self.execute_raw(
+            admin,
+            ExecuteMsg::AuthoriseNetworkMonitor {
+                address: addr.to_string(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn dummy_node_performance(&mut self) -> NodePerformance {
+        let node_id = self.bond_dummy_nymnode().unwrap();
+        NodePerformance {
+            node_id,
+            performance: Percent::from_percentage_value(69).unwrap(),
+        }
+    }
+
+    fn retire_network_monitor(&mut self, addr: &Addr) -> Result<(), NymPerformanceContractError> {
+        let admin = self.admin_unchecked();
+        self.execute_raw(
+            admin,
+            ExecuteMsg::RetireNetworkMonitor {
+                address: addr.to_string(),
+            },
+        )?;
+        Ok(())
+    }
+
+    fn insert_epoch_performance(
+        &mut self,
+        addr: &Addr,
+        epoch_id: EpochId,
+        node_id: NodeId,
+        performance: Percent,
+    ) -> Result<(), NymPerformanceContractError> {
+        let env = self.env();
+        NYM_PERFORMANCE_CONTRACT_STORAGE.submit_performance_data(
+            self.deps_mut(),
+            env,
+            addr,
+            epoch_id,
+            NodePerformance {
+                node_id,
+                performance,
+            },
+        )
+    }
+
+    fn insert_performance(
+        &mut self,
+        addr: &Addr,
+        node_id: NodeId,
+        performance: Percent,
+    ) -> Result<(), NymPerformanceContractError> {
+        let epoch_id = self.current_mixnet_epoch()?;
+
+        self.insert_epoch_performance(addr, epoch_id, node_id, performance)
+    }
+
+    // makes testing easier
+    fn insert_raw_performance(
+        &mut self,
+        addr: &Addr,
+        node_id: NodeId,
+        raw: &str,
+    ) -> Result<(), NymPerformanceContractError> {
+        self.insert_performance(
+            addr,
+            node_id,
+            Percent::from_str(raw).map_err(|err| {
+                NymPerformanceContractError::StdErr(StdError::parse_err("Percent", err.to_string()))
+            })?,
+        )
+    }
+
+    fn read_raw_scores(
+        &self,
+        epoch_id: EpochId,
+        node_id: NodeId,
+    ) -> Result<NodeResults, NymPerformanceContractError> {
+        let scores = NYM_PERFORMANCE_CONTRACT_STORAGE
+            .performance_results
+            .results
+            .load(self.deps().storage, (epoch_id, node_id))?;
+        Ok(scores)
+    }
+}
+
+impl PerformanceContractTesterExt for ContractTester<PerformanceContract> {}
