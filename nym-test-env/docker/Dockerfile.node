@@ -1,0 +1,71 @@
+ARG NYXD_SEED_IMAGE=nym-test/nyxd-seed:imported
+ARG NYM_NODE_BASE_IMAGE=nym-test/nym-node-base:imported
+
+FROM ${NYXD_SEED_IMAGE} AS seed
+
+FROM nym-test/runtime-base:v2 AS validator
+ARG NODE_NAME
+ENV DEBIAN_FRONTEND=noninteractive \
+    LD_LIBRARY_PATH=/lib/x86_64-linux-gnu \
+    NODE_NAME=${NODE_NAME} \
+    NODE_ROLE=validator
+COPY --from=seed /usr/local/bin/nyxd /usr/local/bin/nyxd
+COPY --from=seed /usr/local/bin/nym-socks5-client /usr/local/bin/nym-socks5-client
+COPY --from=seed /lib/x86_64-linux-gnu/libwasmvm.x86_64.so /lib/x86_64-linux-gnu/libwasmvm.x86_64.so
+COPY bin/contracts/ /opt/nym/contracts/
+COPY --from=seed /usr/local/share/nym-build.env /usr/local/share/nym-build.env
+COPY --from=seed /opt/seed/${NODE_NAME} /opt/nym/node-seed
+COPY --from=seed /opt/seed/cluster.env /opt/nym/cluster.env
+COPY scripts/bootstrap/toml.sh /opt/nym/bootstrap/toml.sh
+COPY controls /opt/nym/controls
+COPY scripts/runtime /opt/nym/runtime
+COPY scenarios /opt/nym/scenarios
+RUN case "${NODE_NAME}" in node01|node02|node03) ;; *) echo "invalid validator NODE_NAME: ${NODE_NAME}" >&2; exit 1 ;; esac \
+    && find /opt/nym/controls /opt/nym/runtime /opt/nym/scenarios -type f -name '*.sh' -exec chmod 0755 {} + \
+    && chmod 0755 /opt/nym/bootstrap/toml.sh \
+    && test -x /usr/local/bin/nym-socks5-client \
+    && test -x /opt/nym/runtime/local-nym-api \
+    && mkdir -p /var/lib/nym \
+    && nyxd version
+LABEL org.opencontainers.image.title="Nym test ${NODE_NAME}" \
+      org.opencontainers.image.description="Separate imported-binary nyxd validator image configured to commit the first 200 blocks, then join a synchronized live chain before scenarios"
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/nym/runtime/validator-entrypoint.sh"]
+
+FROM ${NYM_NODE_BASE_IMAGE} AS nym-node
+ARG NODE_NAME
+ARG NODE_ROLE
+ARG NYM_ID
+ARG NYM_MODES
+ARG NYM_LAYER
+ARG NYM_MIX_PORT
+ARG NYM_VERLOC_PORT
+ARG NYM_HTTP_PORT
+ARG NYM_ENTRY_PORT
+ENV NODE_NAME=${NODE_NAME} \
+    NODE_ROLE=${NODE_ROLE} \
+    NYM_ID=${NYM_ID} \
+    NYM_MODES=${NYM_MODES} \
+    NYM_LAYER=${NYM_LAYER} \
+    NYM_MIX_PORT=${NYM_MIX_PORT} \
+    NYM_VERLOC_PORT=${NYM_VERLOC_PORT} \
+    NYM_HTTP_PORT=${NYM_HTTP_PORT} \
+    NYM_ENTRY_PORT=${NYM_ENTRY_PORT}
+COPY controls /opt/nym/controls
+COPY scripts/runtime /opt/nym/runtime
+COPY scenarios /opt/nym/scenarios
+RUN case "${NODE_NAME}" in node04|node05|node06|node07|node08) ;; *) echo "invalid nym-node NODE_NAME: ${NODE_NAME}" >&2; exit 1 ;; esac \
+    && test -n "${NODE_ROLE}" \
+    && test -n "${NYM_ID}" \
+    && test -n "${NYM_MODES}" \
+    && test -n "${NYM_LAYER}" \
+    && test -n "${NYM_MIX_PORT}" \
+    && test -n "${NYM_VERLOC_PORT}" \
+    && test -n "${NYM_HTTP_PORT}" \
+    && test -n "${NYM_ENTRY_PORT}" \
+    && find /opt/nym/controls /opt/nym/runtime /opt/nym/scenarios -type f -name '*.sh' -exec chmod 0755 {} + \
+    && test -x /opt/nym/runtime/local-nym-api \
+    && test -s /opt/nym/bootstrap/toml.sh \
+    && mkdir -p /var/lib/nym
+LABEL org.opencontainers.image.title="Nym test ${NODE_NAME}" \
+      org.opencontainers.image.description="Separate imported-binary nym-node image: ${NODE_ROLE}"
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/nym/runtime/nym-node-entrypoint.sh"]

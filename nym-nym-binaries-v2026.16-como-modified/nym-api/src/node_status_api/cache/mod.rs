@@ -29,6 +29,12 @@ enum NodeStatusCacheError {
 
     #[error(transparent)]
     PerformanceRetrievalFailure(#[from] PerformanceRetrievalFailure),
+
+    #[error("failed to persist or retrieve selection performance evidence: {0}")]
+    SelectionEvidenceStorage(#[from] sqlx::Error),
+
+    #[error("selection performance history contains an invalid {field}: {value}")]
+    InvalidSelectionEvidenceRow { field: &'static str, value: i64 },
 }
 
 impl From<UninitialisedCache> for NodeStatusCacheError {

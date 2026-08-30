@@ -7,11 +7,15 @@ use crate::node_describe_cache::cache::DescribedNodes;
 use crate::node_performance::provider::{
     NodePerformanceProvider, NodesRoutingScores, NodesStressTestingScores,
 };
+use crate::node_performance::evidence::{
+    first_history_epoch, summarise_performance, PerformanceSample,
+};
 use crate::node_status_api::cache::config_score::calculate_config_score;
 use crate::support::caching::cache::SharedCache;
 use crate::support::caching::refresher::RefreshRequester;
 use crate::support::caching::CacheNotificationWatcher;
 use crate::support::nyxd::Client;
+use crate::support::storage::NymApiStorage;
 use crate::{
     mixnet_contract_cache::cache::MixnetContractCache,
     node_status_api::cache::NodeStatusCacheError, support::caching::CacheNotification,
@@ -158,6 +162,9 @@ pub struct NodeStatusCacheRefresher {
     on_disk_file: PathBuf,
 
     performance_provider: Box<dyn NodePerformanceProvider + Send + Sync>,
+
+    /// Persistent, epoch-bounded performance history used to construct selection evidence.
+    storage: NymApiStorage,
 }
 
 impl NodeStatusCacheRefresher {
@@ -171,6 +178,7 @@ impl NodeStatusCacheRefresher {
         contract_cache_listener: CacheNotificationWatcher,
         describe_cache_listener: CacheNotificationWatcher,
         performance_provider: Box<dyn NodePerformanceProvider + Send + Sync>,
+        storage: NymApiStorage,
         on_disk_file: PathBuf,
     ) -> Self {
         // due to the number of queries required, create an explicit query instance
@@ -188,6 +196,7 @@ impl NodeStatusCacheRefresher {
             refresh_requester: Default::default(),
             on_disk_file,
             performance_provider,
+            storage,
             query_client,
         }
     }
@@ -437,11 +446,75 @@ impl NodeStatusCacheRefresher {
                         config_score,
                         stress_testing_score,
                     ),
+                    selection_evidence: None,
                 },
             );
         }
 
         annotations
+    }
+
+    async fn attach_selection_evidence(
+        &self,
+        current_epoch: u32,
+        annotations: &mut HashMap<NodeId, NodeAnnotationV2>,
+    ) -> Result<(), NodeStatusCacheError> {
+        let current_samples = annotations
+            .iter()
+            .filter_map(|(node_id, annotation)| {
+                let performance = annotation.detailed_performance.performance_score;
+                performance
+                    .is_finite()
+                    .then_some((*node_id, performance.clamp(0.0, 1.0)))
+            })
+            .collect::<Vec<_>>();
+
+        self.storage
+            .manager
+            .upsert_selection_performance_samples(
+                current_epoch,
+                OffsetDateTime::now_utc().unix_timestamp(),
+                &current_samples,
+            )
+            .await?;
+
+        let stored_samples = self
+            .storage
+            .manager
+            .selection_performance_samples(first_history_epoch(current_epoch), current_epoch)
+            .await?;
+        let mut samples_by_node = HashMap::<NodeId, Vec<PerformanceSample>>::new();
+
+        for sample in stored_samples {
+            let node_id = NodeId::try_from(sample.node_id).map_err(|_| {
+                NodeStatusCacheError::InvalidSelectionEvidenceRow {
+                    field: "node_id",
+                    value: sample.node_id,
+                }
+            })?;
+            let epoch_id = u32::try_from(sample.epoch_id).map_err(|_| {
+                NodeStatusCacheError::InvalidSelectionEvidenceRow {
+                    field: "epoch_id",
+                    value: sample.epoch_id,
+                }
+            })?;
+
+            samples_by_node
+                .entry(node_id)
+                .or_default()
+                .push(PerformanceSample {
+                    epoch_id,
+                    performance: sample.performance,
+                });
+        }
+
+        for (node_id, annotation) in annotations {
+            annotation.selection_evidence = samples_by_node
+                .get(node_id)
+                .and_then(|samples| summarise_performance(current_epoch, samples));
+        }
+
+        Ok(())
     }
 
     /// Refreshes the node status cache by fetching the latest data from the contract cache
@@ -486,7 +559,7 @@ impl NodeStatusCacheRefresher {
         self.refresh_chain_capabilities(&described).await;
 
         // Create annotated data
-        let node_annotations = self
+        let mut node_annotations = self
             .produce_node_annotations(
                 &config_score_data,
                 &routing_scores,
@@ -496,6 +569,12 @@ impl NodeStatusCacheRefresher {
                 &described,
             )
             .await;
+
+        self.attach_selection_evidence(
+            current_interval.current_epoch_absolute_id(),
+            &mut node_annotations,
+        )
+        .await?;
 
         // Update the cache
         self.cache.update(node_annotations).await;

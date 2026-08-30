@@ -1,0 +1,6 @@
+.git
+*.zip
+.import.*
+logs/
+!bin/contracts/
+!bin/contracts/**

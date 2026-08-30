@@ -186,6 +186,15 @@ pub struct RetrievedAverageStressTestResult {
     pub was_reachable: bool,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct SelectionPerformanceSample {
+    pub(crate) node_id: i64,
+    pub(crate) epoch_id: i64,
+    pub(crate) performance: f64,
+    #[allow(dead_code)]
+    pub(crate) measured_at: i64,
+}
+
 impl From<RetrievedAverageStressTestResult> for StressTestingScore {
     fn from(value: RetrievedAverageStressTestResult) -> Self {
         StressTestingScore {

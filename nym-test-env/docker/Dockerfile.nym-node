@@ -1,0 +1,13 @@
+ARG RUNTIME_BASE_IMAGE=nym-test/runtime-base:v2
+FROM ${RUNTIME_BASE_IMAGE}
+COPY bin/bin/nym-node /usr/local/bin/nym-node
+COPY bin/contracts/mixnet_contract_env_names /opt/nym/contracts/mixnet_contract_env_names
+
+COPY bin/bin/nym-base58 /usr/local/bin/nym-base58
+COPY bin/metadata/build.env /usr/local/share/nym-build.env
+COPY scripts/bootstrap/toml.sh /opt/nym/bootstrap/toml.sh
+RUN chmod 0755 /usr/local/bin/nym-node /usr/local/bin/nym-base58 /opt/nym/bootstrap/toml.sh \
+    && nym-node --version \
+    && test "$(nym-base58 111)" = '[0,0,0]'
+LABEL org.opencontainers.image.title="Nym node base from imported binaries" \
+      nym.test.binary.origin="imported-build-output"

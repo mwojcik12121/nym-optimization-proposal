@@ -327,6 +327,7 @@ async fn start_nym_api_tasks(mut config: Config) -> anyhow::Result<ShutdownManag
         &described_nodes_cache,
         &node_status_cache_state,
         performance_provider,
+        storage.clone(),
         contract_cache_watcher.clone(),
         describe_cache_watcher,
         annotations_path,

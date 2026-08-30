@@ -9,6 +9,7 @@ use crate::support::storage::models::{
     RetrievedAverageStressTestResult, RewardingReport, TestedGatewayStatus, TestedMixnodeStatus,
     TestingRoute,
 };
+use crate::support::storage::models::SelectionPerformanceSample;
 use crate::support::storage::DbIdCache;
 use nym_mixnet_contract_common::{EpochId, IdentityKey, NodeId};
 use nym_types::monitoring::NodeResult;
@@ -22,6 +23,60 @@ pub(crate) struct StorageManager {
 
 // all SQL goes here
 impl StorageManager {
+    pub(crate) async fn upsert_selection_performance_samples(
+        &self,
+        epoch_id: u32,
+        measured_at: i64,
+        samples: &[(NodeId, f64)],
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.connection_pool.begin().await?;
+
+        for (node_id, performance) in samples {
+            if !performance.is_finite() {
+                continue;
+            }
+
+            sqlx::query(
+                r#"
+                    INSERT INTO selection_performance_history(
+                        node_id, epoch_id, performance, measured_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(node_id, epoch_id) DO UPDATE SET
+                        performance = excluded.performance,
+                        measured_at = excluded.measured_at
+                "#,
+            )
+            .bind(i64::from(*node_id))
+            .bind(i64::from(epoch_id))
+            .bind(performance.clamp(0.0, 1.0))
+            .bind(measured_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        transaction.commit().await
+    }
+
+    pub(crate) async fn selection_performance_samples(
+        &self,
+        first_epoch: u32,
+        last_epoch: u32,
+    ) -> Result<Vec<SelectionPerformanceSample>, sqlx::Error> {
+        sqlx::query_as(
+            r#"
+                SELECT node_id, epoch_id, performance, measured_at
+                FROM selection_performance_history
+                WHERE epoch_id BETWEEN ? AND ?
+                ORDER BY node_id ASC, epoch_id ASC
+            "#,
+        )
+        .bind(i64::from(first_epoch))
+        .bind(i64::from(last_epoch))
+        .fetch_all(&self.connection_pool)
+        .await
+    }
+
     /// Tries to obtain row id of given mixnode given its identity.
     ///
     /// # Arguments
@@ -1308,5 +1363,37 @@ pub(crate) mod v3_migration {
             .await?;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod selection_performance_tests {
+    use crate::support::storage::NymApiStorage;
+
+    #[tokio::test]
+    async fn repeated_epoch_sample_is_upserted_instead_of_counted_twice() {
+        let storage = NymApiStorage::init_in_memory().await.unwrap();
+
+        storage
+            .manager
+            .upsert_selection_performance_samples(7, 100, &[(42, 0.5)])
+            .await
+            .unwrap();
+        storage
+            .manager
+            .upsert_selection_performance_samples(7, 200, &[(42, 0.9)])
+            .await
+            .unwrap();
+
+        let samples = storage
+            .manager
+            .selection_performance_samples(7, 7)
+            .await
+            .unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].node_id, 42);
+        assert_eq!(samples[0].performance, 0.9);
+        assert_eq!(samples[0].measured_at, 200);
     }
 }

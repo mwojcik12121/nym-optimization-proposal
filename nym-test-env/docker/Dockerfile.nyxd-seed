@@ -1,0 +1,20 @@
+ARG RUNTIME_BASE_IMAGE=nym-test/runtime-base:v2
+FROM ${RUNTIME_BASE_IMAGE}
+ENV LD_LIBRARY_PATH=/lib/x86_64-linux-gnu \
+    INITIAL_CHAIN_HEIGHT=200
+COPY bin/bin/nyxd /usr/local/bin/nyxd
+COPY bin/bin/nym-socks5-client /usr/local/bin/nym-socks5-client
+COPY bin/lib/libwasmvm.x86_64.so /lib/x86_64-linux-gnu/libwasmvm.x86_64.so
+COPY bin/contracts/ /opt/nym/contracts/
+
+COPY bin/metadata/build.env /usr/local/share/nym-build.env
+COPY scripts/bootstrap /opt/nym/bootstrap
+RUN chmod 0755 /usr/local/bin/nyxd /usr/local/bin/nym-socks5-client \
+    && find /opt/nym/bootstrap -type f -name '*.sh' -exec chmod 0755 {} + \
+    && nyxd version \
+    && nym-socks5-client --version \
+    && nyxd rollback --help >/dev/null \
+    && nyxd start --help | grep -Fq -- '--wasm.skip_wasmvm_version_check' \
+    && /opt/nym/bootstrap/generate-seed.sh
+LABEL org.opencontainers.image.title="Nym local Nyx seed from imported binaries" \
+      nym.test.binary.origin="imported-build-output"

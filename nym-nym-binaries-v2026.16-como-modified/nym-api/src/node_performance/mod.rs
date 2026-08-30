@@ -2,4 +2,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub(crate) mod contract_cache;
+pub(crate) mod evidence;
 pub(crate) mod provider;

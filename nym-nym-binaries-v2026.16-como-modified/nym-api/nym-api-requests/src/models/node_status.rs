@@ -444,6 +444,29 @@ pub struct ChainInteractionCapabilitiesDetailed {
     feature = "generate-ts",
     ts(
         export,
+        export_to = "ts-packages/types/src/types/rust/SelectionPerformanceSummary.ts"
+    )
+)]
+pub struct SelectionPerformanceSummary {
+    /// Exponentially weighted mean performance in the normalised range [0, 1].
+    pub weighted_mean: f64,
+
+    /// Exponentially weighted standard deviation in the normalised range [0, 1].
+    pub weighted_stddev: f64,
+
+    /// Effective independent information content, rather than the raw row count.
+    pub effective_samples: u32,
+
+    /// Absolute epoch containing the newest observation used by this summary.
+    pub newest_epoch: u32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[cfg_attr(feature = "generate-ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "generate-ts",
+    ts(
+        export,
         export_to = "ts-packages/types/src/types/rust/NodeAnnotationV2.ts"
     )
 )]
@@ -453,6 +476,11 @@ pub struct NodeAnnotationV2 {
     pub chain_interaction_capabilities: Option<ChainInteractionCapabilitiesDetailed>,
 
     pub detailed_performance: DetailedNodePerformanceV2,
+
+    /// Historical evidence used for rewarded-set selection. This is absent until enough local
+    /// history has been collected or whenever the history cannot be calculated safely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_evidence: Option<SelectionPerformanceSummary>,
 }
 
 impl From<NodeAnnotationV2> for NodeAnnotationV1 {

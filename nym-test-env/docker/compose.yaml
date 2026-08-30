@@ -1,0 +1,274 @@
+name: nym-docker-testnet
+
+x-common-environment: &common-environment
+  SCENARIO_NUMBER: "${SCENARIO_NUMBER:-1}"
+  NYM_SHARED_DIR: /run/nym-shared
+  NYM_SELECTED_NODES: "${NYM_SELECTED_NODES:-node01,node02,node03,node04,node05,node06,node07,node08}"
+  CHAIN_ID: nym-local-200
+  INITIAL_CHAIN_HEIGHT: "200"
+  CHAIN_READY_TIMEOUT: "600"
+  VALIDATOR_SYNC_MAX_LAG: "${VALIDATOR_SYNC_MAX_LAG:-2}"
+  VALIDATOR_SYNC_CONFIRMATIONS: "${VALIDATOR_SYNC_CONFIRMATIONS:-3}"
+  VALIDATOR_SYNC_POLL_INTERVAL: "${VALIDATOR_SYNC_POLL_INTERVAL:-0.5}"
+  RUST_BACKTRACE: "1"
+  RUST_LOG: "${RUST_LOG:-info}"
+  TZ: "${TZ:-:/etc/localtime}"
+  NYM_APPLICATION_LOG_MODE: "${NYM_APPLICATION_LOG_MODE:-all}"
+  NYM_NETWORK_INTERFACE: eth0
+  NYM_LOCAL_API_PORT: "18080"
+  NYM_SOCKS5_CLIENT_PORT: "1080"
+  NYM_SOCKS5_API_PORT: "18081"
+  NYM_TRAFFIC_RECEIVER_PORT: "18090"
+  MIXNET_EXIT_IP: "172.31.0.25"
+  MIXNET_DELAY_MS: "${MIXNET_DELAY_MS:-250}"
+  MIXNET_DELAY_JITTER_MS: "${MIXNET_DELAY_JITTER_MS:-50}"
+  MIXNET_SUCCESS_TIMEOUT: "${MIXNET_SUCCESS_TIMEOUT:-180}"
+  MIXNET_PARTITION_TIMEOUT: "${MIXNET_PARTITION_TIMEOUT:-20}"
+
+x-node-common: &node-common
+  platform: linux/amd64
+  restart: "no"
+  pull_policy: never
+  cpus: 1.0
+  mem_limit: 3g
+  memswap_limit: 3g
+  pids_limit: 1024
+  storage_opt:
+    size: "96000M"
+  cap_add:
+    - NET_ADMIN
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 20s
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  command: ["${SCENARIO_NUMBER:-1}"]
+  volumes:
+    - nym_shared:/run/nym-shared
+    - /etc/localtime:/etc/localtime:ro
+
+services:
+  node01:
+    <<: *node-common
+    image: nym-test/node01:local
+    hostname: node01
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: validator
+      network: none
+      args:
+        NYXD_SEED_IMAGE: nym-test/nyxd-seed:imported
+        NODE_NAME: node01
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.11
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.11
+
+  node02:
+    <<: *node-common
+    image: nym-test/node02:local
+    hostname: node02
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: validator
+      network: none
+      args:
+        NYXD_SEED_IMAGE: nym-test/nyxd-seed:imported
+        NODE_NAME: node02
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.12
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.12
+
+  node03:
+    <<: *node-common
+    image: nym-test/node03:local
+    hostname: node03
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: validator
+      network: none
+      args:
+        NYXD_SEED_IMAGE: nym-test/nyxd-seed:imported
+        NODE_NAME: node03
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.13
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.13
+
+  node04:
+    <<: *node-common
+    image: nym-test/node04:local
+    hostname: node04
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: nym-node
+      network: none
+      args:
+        NYM_NODE_BASE_IMAGE: nym-test/nym-node-base:imported
+        NODE_NAME: node04
+        NODE_ROLE: mixnode-layer1
+        NYM_ID: node04-local
+        NYM_MODES: mixnode
+        NYM_LAYER: "1"
+        NYM_MIX_PORT: "10004"
+        NYM_VERLOC_PORT: "20004"
+        NYM_HTTP_PORT: "30004"
+        NYM_ENTRY_PORT: "9004"
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.21
+      NYXD_RPC_HTTP: http://node01:26657
+      NYXD_RPC_TCP: tcp://node01:26657
+      NYXD_RPC_WEBSOCKET: ws://node01:26657/websocket
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.21
+
+  node05:
+    <<: *node-common
+    image: nym-test/node05:local
+    hostname: node05
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: nym-node
+      network: none
+      args:
+        NYM_NODE_BASE_IMAGE: nym-test/nym-node-base:imported
+        NODE_NAME: node05
+        NODE_ROLE: mixnode-layer2
+        NYM_ID: node05-local
+        NYM_MODES: mixnode
+        NYM_LAYER: "2"
+        NYM_MIX_PORT: "10005"
+        NYM_VERLOC_PORT: "20005"
+        NYM_HTTP_PORT: "30005"
+        NYM_ENTRY_PORT: "9005"
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.22
+      NYXD_RPC_HTTP: http://node02:26657
+      NYXD_RPC_TCP: tcp://node02:26657
+      NYXD_RPC_WEBSOCKET: ws://node02:26657/websocket
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.22
+
+  node06:
+    <<: *node-common
+    image: nym-test/node06:local
+    hostname: node06
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: nym-node
+      network: none
+      args:
+        NYM_NODE_BASE_IMAGE: nym-test/nym-node-base:imported
+        NODE_NAME: node06
+        NODE_ROLE: mixnode-layer3
+        NYM_ID: node06-local
+        NYM_MODES: mixnode
+        NYM_LAYER: "3"
+        NYM_MIX_PORT: "10006"
+        NYM_VERLOC_PORT: "20006"
+        NYM_HTTP_PORT: "30006"
+        NYM_ENTRY_PORT: "9006"
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.23
+      NYXD_RPC_HTTP: http://node03:26657
+      NYXD_RPC_TCP: tcp://node03:26657
+      NYXD_RPC_WEBSOCKET: ws://node03:26657/websocket
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.23
+
+  node07:
+    <<: *node-common
+    image: nym-test/node07:local
+    hostname: node07
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: nym-node
+      network: none
+      args:
+        NYM_NODE_BASE_IMAGE: nym-test/nym-node-base:imported
+        NODE_NAME: node07
+        NODE_ROLE: entry-gateway
+        NYM_ID: node07-local
+        NYM_MODES: entry-gateway
+        NYM_LAYER: "0"
+        NYM_MIX_PORT: "10007"
+        NYM_VERLOC_PORT: "20007"
+        NYM_HTTP_PORT: "30007"
+        NYM_ENTRY_PORT: "9007"
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.24
+      NYXD_RPC_HTTP: http://node01:26657
+      NYXD_RPC_TCP: tcp://node01:26657
+      NYXD_RPC_WEBSOCKET: ws://node01:26657/websocket
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.24
+
+  node08:
+    <<: *node-common
+    image: nym-test/node08:local
+    hostname: node08
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node
+      target: nym-node
+      network: none
+      args:
+        NYM_NODE_BASE_IMAGE: nym-test/nym-node-base:imported
+        NODE_NAME: node08
+        NODE_ROLE: exit-gateway
+        NYM_ID: node08-local
+        NYM_MODES: entry-gateway,exit-gateway
+        NYM_LAYER: "0"
+        NYM_MIX_PORT: "10008"
+        NYM_VERLOC_PORT: "20008"
+        NYM_HTTP_PORT: "30008"
+        NYM_ENTRY_PORT: "9008"
+    environment:
+      <<: *common-environment
+      NODE_IP: 172.31.0.25
+      NYXD_RPC_HTTP: http://node02:26657
+      NYXD_RPC_TCP: tcp://node02:26657
+      NYXD_RPC_WEBSOCKET: ws://node02:26657/websocket
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    networks:
+      nym_internal:
+        ipv4_address: 172.31.0.25
+
+networks:
+  nym_internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+          gateway: 172.31.0.1
+
+volumes:
+  nym_shared:
+    labels:
+      nym.test.temporary: "true"

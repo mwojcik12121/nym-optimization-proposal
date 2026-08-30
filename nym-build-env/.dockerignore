@@ -1,0 +1,7 @@
+.git
+bin
+.build-output.*
+src/*/.git
+src/*/target
+src/*/build
+!scripts/mixnet-contract.sh

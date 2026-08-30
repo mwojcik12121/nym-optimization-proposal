@@ -9,6 +9,7 @@ use crate::support::caching::cache::SharedCache;
 use crate::support::caching::refresher::RefreshRequester;
 use crate::support::config;
 use crate::support::nyxd::Client;
+use crate::support::storage::NymApiStorage;
 use crate::{
     mixnet_contract_cache::cache::MixnetContractCache,
     support::{self},
@@ -43,6 +44,7 @@ pub(crate) async fn start_cache_refresh(
     described_cache: &SharedCache<DescribedNodes>,
     node_status_cache_state: &NodeStatusCache,
     performance_provider: Box<dyn NodePerformanceProvider + Send + Sync>,
+    storage: NymApiStorage,
     nym_contract_cache_listener: watch::Receiver<support::caching::CacheNotification>,
     described_cache_cache_listener: watch::Receiver<support::caching::CacheNotification>,
     on_disk_file: PathBuf,
@@ -86,6 +88,7 @@ pub(crate) async fn start_cache_refresh(
         nym_contract_cache_listener,
         described_cache_cache_listener,
         performance_provider,
+        storage,
         on_disk_file,
     )
     .await;

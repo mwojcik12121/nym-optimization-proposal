@@ -3,14 +3,17 @@
 
 use crate::epoch_operations::error::RewardingError;
 use crate::epoch_operations::helpers::stake_to_f64;
+use crate::node_performance::evidence::{evidence_guard, freshness};
 use crate::EpochAdvancer;
 use cosmwasm_std::Decimal;
+use nym_api_requests::models::SelectionPerformanceSummary;
 use nym_mixnet_contract_common::reward_params::{Performance, RewardedSetParams};
 use nym_mixnet_contract_common::{
     EpochState, NodeId, NymNodeDetails, RewardedSet, RewardingParams,
 };
 use rand::prelude::SliceRandom;
 use rand::rngs::OsRng;
+use rand::{CryptoRng, Rng};
 use std::collections::HashSet;
 use tracing::{debug, error, info, warn};
 
@@ -27,25 +30,62 @@ enum AvailableRole {
 }
 
 #[derive(Debug, Clone)]
+const PERFORMANCE_EXPONENT: i32 = 8;
+const MIN_BOOTSTRAP_SAMPLES: u32 = 4;
+const FULL_WEIGHT_SAMPLES: u32 = 8;
+const PROVISIONAL_WEIGHT_FACTOR: f64 = 0.35;
+const BOOTSTRAP_ROLE_FRACTION: f64 = 0.02;
+
 struct NodeWithSaturationAndPerformance {
     node_id: NodeId,
     available_roles: Vec<AvailableRole>,
     saturation: Decimal,
-    performance: Performance,
+    current_performance: Performance,
+    selection_evidence: Option<SelectionPerformanceSummary>,
 }
 
 impl NodeWithSaturationAndPerformance {
-    fn to_selection_weight(&self) -> f64 {
-        let scaled_performance = match self.performance.checked_pow(20) {
-            Ok(perf) => perf,
-            Err(overflow) => {
-                warn!("the node's performance ({}) has overflow while scaling it by the factor of 20: {overflow}. Setting it to 0 instead.", self.performance);
-                return 0.;
-            }
+    fn to_selection_weight(&self, current_epoch: u32) -> f64 {
+        let Some(summary) = self.selection_evidence.as_ref() else {
+            return 0.0;
         };
+        if summary.effective_samples < MIN_BOOTSTRAP_SAMPLES {
+            return 0.0;
+        }
 
-        let scaled_stake = self.saturation * scaled_performance;
-        stake_to_f64(scaled_stake)
+        let mean = summary.weighted_mean.clamp(0.0, 1.0);
+        let maturity = if summary.effective_samples < FULL_WEIGHT_SAMPLES {
+            PROVISIONAL_WEIGHT_FACTOR
+        } else {
+            1.0
+        };
+        let weight = stake_to_f64(self.saturation)
+            * mean.powi(PERFORMANCE_EXPONENT)
+            * evidence_guard(summary)
+            * freshness(current_epoch, summary.newest_epoch)
+            * maturity;
+
+        debug!(
+            node_id = self.node_id,
+            current_performance = %self.current_performance,
+            historical_mean = summary.weighted_mean,
+            effective_samples = summary.effective_samples,
+            weight,
+            "calculated evidence-aware rewarded-set selection weight"
+        );
+
+        if weight.is_finite() {
+            weight.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn is_bootstrap_candidate(&self) -> bool {
+        self.selection_evidence
+            .as_ref()
+            .map(|summary| summary.effective_samples < MIN_BOOTSTRAP_SAMPLES)
+            .unwrap_or(true)
     }
 
     fn can_operate_mixnode(&self) -> bool {
@@ -61,11 +101,77 @@ impl NodeWithSaturationAndPerformance {
     }
 }
 
+fn choose_role_with_bootstrap<R, F>(
+    rng: &mut R,
+    candidates: &[NodeWithSaturationAndPerformance],
+    requested_count: usize,
+    current_epoch: u32,
+    eligible_for_role: F,
+) -> Result<HashSet<NodeId>, RewardingError>
+where
+    R: Rng + CryptoRng,
+    F: Fn(&NodeWithSaturationAndPerformance) -> bool,
+{
+    if requested_count == 0 {
+        return Ok(HashSet::new());
+    }
+
+    // New and weakly observed nodes are kept in an explicit, bounded pool. The ceiling preserves
+    // a bootstrap path for small role sets, while never allowing that path to consume more than
+    // the requested role count.
+    let bootstrap_limit = ((requested_count as f64 * BOOTSTRAP_ROLE_FRACTION).ceil() as usize)
+        .min(requested_count);
+    let bootstrap_candidates = candidates
+        .iter()
+        .filter(|candidate| eligible_for_role(candidate))
+        .filter(|candidate| candidate.is_bootstrap_candidate())
+        .collect::<Vec<_>>();
+    let bootstrap_count = bootstrap_limit.min(bootstrap_candidates.len());
+    let mut selected = bootstrap_candidates
+        .choose_multiple(rng, bootstrap_count)
+        .map(|candidate| candidate.node_id)
+        .collect::<HashSet<_>>();
+
+    // If the bootstrap pool is short, its unused quota returns to the evidence-backed pool. It is
+    // never filled with additional low-history nodes, keeping experimental exposure bounded.
+    let main_count = requested_count.saturating_sub(selected.len());
+    let main_candidates = candidates
+        .iter()
+        .filter(|candidate| eligible_for_role(candidate))
+        .filter(|candidate| !candidate.is_bootstrap_candidate())
+        .filter_map(|candidate| {
+            let weight = candidate.to_selection_weight(current_epoch);
+            (weight > 0.0).then_some((candidate, weight))
+        })
+        .collect::<Vec<_>>();
+
+    let weighted_count = main_count.min(main_candidates.len());
+    if weighted_count > 0 {
+        selected.extend(
+            main_candidates
+                .choose_multiple_weighted(rng, weighted_count, |item| item.1)?
+                .map(|item| item.0.node_id),
+        );
+    }
+
+    if selected.len() < requested_count {
+        warn!(
+            selected = selected.len(),
+            requested = requested_count,
+            bootstrap_limit,
+            "role assignment underfilled after evidence filtering"
+        );
+    }
+
+    Ok(selected)
+}
+
 impl EpochAdvancer {
     fn determine_rewarded_set(
         &self,
         nodes: Vec<NodeWithSaturationAndPerformance>,
         spec: RewardedSetParams,
+        current_epoch: u32,
     ) -> Result<RewardedSet, RewardingError> {
         if nodes.is_empty() {
             warn!("there are no nodes for assignment!");
@@ -74,64 +180,53 @@ impl EpochAdvancer {
 
         let mut rng = OsRng;
 
-        // generate list of nodes and their relatively weight (by total stake scaled by performance)
-        let all_choices = nodes
-            .into_iter()
-            .map(|node| {
-                let weight = node.to_selection_weight();
-                (node, weight)
-            })
-            .collect::<Vec<_>>();
-
         // 1. determine entry gateways
-        let entry_eligible = all_choices
-            .iter()
-            .filter(|node| node.0.can_operate_entry_gateway())
-            .collect::<Vec<_>>();
-        let entry_gateways = entry_eligible
-            .choose_multiple_weighted(&mut rng, spec.entry_gateways as usize, |item| item.1)?
-            .map(|node| node.0.node_id)
-            .collect::<HashSet<_>>();
+        let entry_gateways = choose_role_with_bootstrap(
+            &mut rng,
+            &nodes,
+            spec.entry_gateways as usize,
+            current_epoch,
+            |node| node.can_operate_entry_gateway(),
+        )?;
 
         // 2. determine exit gateways
-        let exit_eligible = all_choices
-            .iter()
-            .filter(|node| {
-                node.0.can_operate_exit_gateway() && !entry_gateways.contains(&node.0.node_id)
-            })
-            .collect::<Vec<_>>();
-        let exit_gateways = exit_eligible
-            .choose_multiple_weighted(&mut rng, spec.exit_gateways as usize, |item| item.1)?
-            .map(|node| node.0.node_id)
-            .collect::<HashSet<_>>();
+        let exit_gateways = choose_role_with_bootstrap(
+            &mut rng,
+            &nodes,
+            spec.exit_gateways as usize,
+            current_epoch,
+            |node| {
+                node.can_operate_exit_gateway() && !entry_gateways.contains(&node.node_id)
+            },
+        )?;
 
         // 3. determine mixnodes
-        let mix_eligible = all_choices
-            .iter()
-            .filter(|node| {
-                node.0.can_operate_mixnode()
-                    && !exit_gateways.contains(&node.0.node_id)
-                    && !entry_gateways.contains(&node.0.node_id)
-            })
-            .collect::<Vec<_>>();
-        let mixnodes = mix_eligible
-            .choose_multiple_weighted(&mut rng, spec.mixnodes as usize, |item| item.1)?
-            .map(|node| node.0.node_id)
-            .collect::<HashSet<_>>();
+        let mixnodes = choose_role_with_bootstrap(
+            &mut rng,
+            &nodes,
+            spec.mixnodes as usize,
+            current_epoch,
+            |node| {
+                node.can_operate_mixnode()
+                    && !exit_gateways.contains(&node.node_id)
+                    && !entry_gateways.contains(&node.node_id)
+            },
+        )?;
 
         // 4. determine standby
-        let standby_eligible = all_choices
-            .iter()
-            .filter(|node| {
-                !exit_gateways.contains(&node.0.node_id)
-                    && !entry_gateways.contains(&node.0.node_id)
-                    && !mixnodes.contains(&node.0.node_id)
-            })
-            .collect::<Vec<_>>();
-        let standby = standby_eligible
-            .choose_multiple_weighted(&mut rng, spec.standby as usize, |item| item.1)?
-            .map(|node| node.0.node_id)
-            .collect::<Vec<_>>();
+        let standby = choose_role_with_bootstrap(
+            &mut rng,
+            &nodes,
+            spec.standby as usize,
+            current_epoch,
+            |node| {
+                !exit_gateways.contains(&node.node_id)
+                    && !entry_gateways.contains(&node.node_id)
+                    && !mixnodes.contains(&node.node_id)
+            },
+        )?
+        .into_iter()
+        .collect::<Vec<_>>();
 
         // 5. split mixnodes into the layers: just shuffle the selected nodes and select every 3rd into each layer
         let mut mixnodes_vec = mixnodes.into_iter().collect::<Vec<_>>();
@@ -255,7 +350,8 @@ impl EpochAdvancer {
                 node_id: nym_node.node_id(),
                 available_roles,
                 saturation,
-                performance,
+                current_performance: performance,
+                selection_evidence: annotation.selection_evidence.clone(),
             })
         }
 
@@ -302,6 +398,11 @@ impl EpochAdvancer {
     ) -> Result<(), RewardingError> {
         // we grab rewarding parameters here as they might have gotten updated when performing epoch actions
         let rewarding_parameters = self.nyxd_client.get_current_rewarding_parameters().await?;
+        let current_epoch = self
+            .current_interval_details()
+            .await?
+            .interval
+            .current_epoch_absolute_id();
 
         debug!("Rewarding parameters: {rewarding_parameters:?}");
 
@@ -309,8 +410,11 @@ impl EpochAdvancer {
             .attach_performance_to_eligible_nodes(nym_nodes, &rewarding_parameters)
             .await;
 
-        let new_rewarded_set =
-            self.determine_rewarded_set(nodes_with_performance, rewarding_parameters.rewarded_set)?;
+        let new_rewarded_set = self.determine_rewarded_set(
+            nodes_with_performance,
+            rewarding_parameters.rewarded_set,
+            current_epoch,
+        )?;
 
         debug!("New rewarded set: {:?}", new_rewarded_set);
 
@@ -318,5 +422,69 @@ impl EpochAdvancer {
             .send_role_assignment_messages(new_rewarded_set)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+
+    fn candidate(
+        node_id: NodeId,
+        selection_evidence: Option<SelectionPerformanceSummary>,
+    ) -> NodeWithSaturationAndPerformance {
+        NodeWithSaturationAndPerformance {
+            node_id,
+            available_roles: vec![AvailableRole::Mix],
+            saturation: Decimal::percent(100),
+            current_performance: Performance::from_percentage_value(90).unwrap(),
+            selection_evidence,
+        }
+    }
+
+    fn mature_evidence() -> SelectionPerformanceSummary {
+        SelectionPerformanceSummary {
+            weighted_mean: 0.9,
+            weighted_stddev: 0.02,
+            effective_samples: FULL_WEIGHT_SAMPLES,
+            newest_epoch: 100,
+        }
+    }
+
+    #[test]
+    fn bootstrap_selection_never_exceeds_its_quota() {
+        let mut candidates = (0..100)
+            .map(|node_id| candidate(node_id, Some(mature_evidence())))
+            .collect::<Vec<_>>();
+        candidates.extend((100..120).map(|node_id| candidate(node_id, None)));
+
+        let mut rng = ChaCha20Rng::seed_from_u64(42);
+        let selected = choose_role_with_bootstrap(&mut rng, &candidates, 100, 100, |_| true)
+            .unwrap();
+        let selected_bootstrap = selected.iter().filter(|node_id| **node_id >= 100).count();
+
+        assert_eq!(selected.len(), 100);
+        assert!(selected_bootstrap <= 2);
+    }
+
+    #[test]
+    fn missing_evidence_never_enters_the_main_pool() {
+        let candidate = candidate(1, None);
+        assert!(candidate.is_bootstrap_candidate());
+        assert_eq!(candidate.to_selection_weight(100), 0.0);
+    }
+
+    #[test]
+    fn stale_or_provisional_evidence_reduces_weight() {
+        let mature = candidate(1, Some(mature_evidence()));
+        let mut provisional_summary = mature_evidence();
+        provisional_summary.effective_samples = MIN_BOOTSTRAP_SAMPLES;
+        let provisional = candidate(2, Some(provisional_summary));
+
+        assert!(mature.to_selection_weight(100) > mature.to_selection_weight(104));
+        assert!(mature.to_selection_weight(100) > provisional.to_selection_weight(100));
     }
 }
