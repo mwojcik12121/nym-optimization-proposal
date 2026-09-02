@@ -3,7 +3,7 @@
 
 use crate::epoch_operations::error::RewardingError;
 use crate::epoch_operations::helpers::stake_to_f64;
-use crate::node_performance::evidence::{evidence_guard, freshness};
+use crate::node_performance::evidence::{conservative_quality, evidence_guard, freshness};
 use crate::EpochAdvancer;
 use cosmwasm_std::Decimal;
 use nym_api_requests::models::SelectionPerformanceSummary;
@@ -29,13 +29,13 @@ enum AvailableRole {
     ExitGateway,
 }
 
-#[derive(Debug, Clone)]
 const PERFORMANCE_EXPONENT: i32 = 8;
 const MIN_BOOTSTRAP_SAMPLES: u32 = 4;
 const FULL_WEIGHT_SAMPLES: u32 = 8;
 const PROVISIONAL_WEIGHT_FACTOR: f64 = 0.35;
 const BOOTSTRAP_ROLE_FRACTION: f64 = 0.02;
 
+#[derive(Debug, Clone)]
 struct NodeWithSaturationAndPerformance {
     node_id: NodeId,
     available_roles: Vec<AvailableRole>,
@@ -47,38 +47,86 @@ struct NodeWithSaturationAndPerformance {
 impl NodeWithSaturationAndPerformance {
     fn to_selection_weight(&self, current_epoch: u32) -> f64 {
         let Some(summary) = self.selection_evidence.as_ref() else {
+            info!(
+                target: "nym_api::selection_scoring",
+                node_id = self.node_id,
+                current_performance = %self.current_performance,
+                stake_saturation = %self.saturation,
+                stake_saturation_factor = stake_to_f64(self.saturation),
+                current_epoch = current_epoch,
+                evidence_available = false,
+                raw_selection_weight = 0.0,
+                final_selection_weight = 0.0,
+                decision = "bootstrap_pool",
+                reason = "missing_selection_evidence",
+                "rewarded-set selection weight decision"
+            );
             return 0.0;
         };
-        if summary.effective_samples < MIN_BOOTSTRAP_SAMPLES {
-            return 0.0;
-        }
 
-        let mean = summary.weighted_mean.clamp(0.0, 1.0);
-        let maturity = if summary.effective_samples < FULL_WEIGHT_SAMPLES {
+        let stake_saturation_factor = stake_to_f64(self.saturation);
+        let historical_mean_raw = summary.weighted_mean;
+        let historical_mean_clamped = historical_mean_raw.clamp(0.0, 1.0);
+        let historical_mean_power_factor = historical_mean_clamped.powi(PERFORMANCE_EXPONENT);
+        let conservative_quality_factor = conservative_quality(summary);
+        let evidence_guard_factor = evidence_guard(summary);
+        let freshness_factor = freshness(current_epoch, summary.newest_epoch);
+        let maturity_factor = if summary.effective_samples < FULL_WEIGHT_SAMPLES {
             PROVISIONAL_WEIGHT_FACTOR
         } else {
             1.0
         };
-        let weight = stake_to_f64(self.saturation)
-            * mean.powi(PERFORMANCE_EXPONENT)
-            * evidence_guard(summary)
-            * freshness(current_epoch, summary.newest_epoch)
-            * maturity;
+        let evidence_age_epochs = current_epoch.saturating_sub(summary.newest_epoch);
+        let raw_weight = stake_saturation_factor
+            * historical_mean_power_factor
+            * evidence_guard_factor
+            * freshness_factor
+            * maturity_factor;
 
-        debug!(
+        let (final_weight, decision, reason) =
+            if summary.effective_samples < MIN_BOOTSTRAP_SAMPLES {
+                (0.0, "bootstrap_pool", "insufficient_effective_samples")
+            } else if !raw_weight.is_finite() {
+                (0.0, "excluded", "non_finite_weight")
+            } else {
+                let final_weight = raw_weight.max(0.0);
+                if final_weight > 0.0 {
+                    (final_weight, "weighted_pool", "evidence_sufficient")
+                } else {
+                    (final_weight, "excluded", "non_positive_weight")
+                }
+            };
+
+        info!(
+            target: "nym_api::selection_scoring",
             node_id = self.node_id,
             current_performance = %self.current_performance,
-            historical_mean = summary.weighted_mean,
+            stake_saturation = %self.saturation,
+            stake_saturation_factor = stake_saturation_factor,
+            historical_mean_raw = historical_mean_raw,
+            historical_mean_clamped = historical_mean_clamped,
+            historical_stddev = summary.weighted_stddev,
+            performance_exponent = PERFORMANCE_EXPONENT,
+            historical_mean_power_factor = historical_mean_power_factor,
+            conservative_quality_factor = conservative_quality_factor,
+            evidence_guard_factor = evidence_guard_factor,
+            freshness_factor = freshness_factor,
+            maturity_factor = maturity_factor,
+            current_epoch = current_epoch,
+            newest_evidence_epoch = summary.newest_epoch,
+            evidence_age_epochs = evidence_age_epochs,
+            evidence_available = true,
             effective_samples = summary.effective_samples,
-            weight,
-            "calculated evidence-aware rewarded-set selection weight"
+            minimum_effective_samples = MIN_BOOTSTRAP_SAMPLES,
+            full_weight_samples = FULL_WEIGHT_SAMPLES,
+            raw_selection_weight = raw_weight,
+            final_selection_weight = final_weight,
+            decision = decision,
+            reason = reason,
+            "rewarded-set selection weight decision"
         );
 
-        if weight.is_finite() {
-            weight.max(0.0)
-        } else {
-            0.0
-        }
+        final_weight
     }
 
     fn is_bootstrap_candidate(&self) -> bool {
@@ -126,6 +174,13 @@ where
         .filter(|candidate| eligible_for_role(candidate))
         .filter(|candidate| candidate.is_bootstrap_candidate())
         .collect::<Vec<_>>();
+
+    // Bootstrap candidates bypass weighted selection, so evaluate their zero-weight decision here
+    // to make missing or insufficient evidence visible alongside the weighted-pool decisions.
+    for candidate in &bootstrap_candidates {
+        candidate.to_selection_weight(current_epoch);
+    }
+
     let bootstrap_count = bootstrap_limit.min(bootstrap_candidates.len());
     let mut selected = bootstrap_candidates
         .choose_multiple(rng, bootstrap_count)
@@ -328,7 +383,21 @@ impl EpochAdvancer {
             };
 
             let performance = annotation.detailed_performance.to_rewarding_performance();
-            debug!("nym-node {node_id}: saturation: {saturation}, performance: {performance}");
+            let detailed_performance = &annotation.detailed_performance;
+            info!(
+                target: "nym_api::selection_scoring",
+                node_id = node_id,
+                candidate_identity = %nym_node.bond_information.identity(),
+                candidate_host = %nym_node.bond_information.node.host.as_str(),
+                stake_saturation = %saturation,
+                routing_score = detailed_performance.routing_score.score,
+                config_score = detailed_performance.config_score.score,
+                stress_testing_score = detailed_performance.stress_testing_score.score,
+                stress_testing_reachable = detailed_performance.stress_testing_score.was_reachable,
+                combined_performance_score = detailed_performance.performance_score,
+                current_performance = %performance,
+                "received rewarded-set scoring inputs for candidate"
+            );
 
             let mut available_roles = Vec::new();
             if self_described.declared_role.mixnode {

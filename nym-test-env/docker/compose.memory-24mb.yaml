@@ -1,9 +1,0 @@
-services:
-  node01: { mem_limit: 3m, memswap_limit: 3m }
-  node02: { mem_limit: 3m, memswap_limit: 3m }
-  node03: { mem_limit: 3m, memswap_limit: 3m }
-  node04: { mem_limit: 3m, memswap_limit: 3m }
-  node05: { mem_limit: 3m, memswap_limit: 3m }
-  node06: { mem_limit: 3m, memswap_limit: 3m }
-  node07: { mem_limit: 3m, memswap_limit: 3m }
-  node08: { mem_limit: 3m, memswap_limit: 3m }

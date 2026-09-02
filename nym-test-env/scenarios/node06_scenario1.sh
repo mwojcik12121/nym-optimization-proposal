@@ -1,31 +1,21 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+fault_timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+_scenario_require_positive_integer "${fault_timeout}" SCENARIO_FAULT_MAX_SECONDS
+barrier_timeout=$((fault_timeout + 180))
+
 scenario_barrier scenario1-ready 360
 assert_internal_only
-scenario_barrier scenario1-chain-transaction 120
-(( $(last_block) >= 201 ))
-nym_health || true
-nym_port_check node05 10005
+(( $(last_block) >= 200 ))
 scenario_barrier scenario1-traffic-ready 300
-scenario_barrier scenario1-baseline-complete 240
+scenario_barrier scenario1-baseline-complete 300
+scenario_barrier scenario1-loop-ready 120
 
-scenario_barrier scenario1-delay-ready 120
-scenario_barrier scenario1-delay-active 120
-scenario_barrier scenario1-delay-observed 240
-scenario_barrier scenario1-delay-healed 120
+run_nym_health_chain_workload
 
-scenario_barrier scenario1-partition-ready 120
-network_partition_peer node05
-scenario_barrier scenario1-partition-active 120
-scenario_barrier scenario1-partition-observed 120
-network_state
-network_heal
-scenario_barrier scenario1-partition-healed 120
-scenario_barrier scenario1-recovery-complete 240
-
+scenario_barrier scenario1-fault-loops-complete "${barrier_timeout}"
+scenario_barrier scenario1-recovery-complete 300
 nym_health || true
-nym_port_check node05 10005
-nym_port_check node08 10008
-listening_ports
-scenario_barrier scenario1-checks-complete 120
+(( $(last_block) >= 200 ))
+scenario_barrier scenario1-checks-complete 180

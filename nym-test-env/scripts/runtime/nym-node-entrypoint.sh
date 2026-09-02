@@ -20,7 +20,6 @@ mkdir -p \
   "${NYM_SHARED_DIR}/ready" \
   "${NYM_SHARED_DIR}/bonding" \
   "${NYM_SHARED_DIR}/details" \
-  "${NYM_SHARED_DIR}/logs" \
   /var/lib/nym/logs
 rm -rf "${HOME}/.nym"
 export NYM_NODE_LOG_FILE="/var/lib/nym/logs/${NODE_NAME}.log"

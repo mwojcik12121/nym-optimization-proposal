@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+fault_timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+_scenario_require_positive_integer "${fault_timeout}" SCENARIO_FAULT_MAX_SECONDS
+barrier_timeout=$((fault_timeout + 180))
+
 scenario_barrier scenario1-ready 360
 assert_internal_only
 (( $(last_block) >= 200 ))
-scenario_barrier scenario1-chain-transaction 120
-account_balance "${NODE02_ADDRESS}"
-validate_chain
 scenario_barrier scenario1-traffic-ready 300
-scenario_barrier scenario1-baseline-complete 240
-scenario_barrier scenario1-delay-ready 120
-scenario_barrier scenario1-delay-active 120
-scenario_barrier scenario1-delay-observed 240
-scenario_barrier scenario1-delay-healed 120
-scenario_barrier scenario1-partition-ready 120
-scenario_barrier scenario1-partition-active 120
-scenario_barrier scenario1-partition-observed 120
-scenario_barrier scenario1-partition-healed 120
-scenario_barrier scenario1-recovery-complete 240
+scenario_barrier scenario1-baseline-complete 300
+scenario_barrier scenario1-loop-ready 120
+
+run_validator_transaction_workload "${NODE03_ADDRESS}"
+
+scenario_barrier scenario1-fault-loops-complete "${barrier_timeout}"
+scenario_barrier scenario1-recovery-complete 300
 validate_chain
-scenario_barrier scenario1-checks-complete 120
+scenario_barrier scenario1-checks-complete 180

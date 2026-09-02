@@ -55,6 +55,300 @@ scenario_barrier() {
   done
 }
 
+_scenario_require_positive_integer() {
+  local value="${1:-}"
+  local name="${2:-value}"
+
+  [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
+    nym_fail scenario "${name} must be a positive integer (got '${value}')"
+    return 1
+  }
+}
+
+_scenario_require_non_negative_integer() {
+  local value="${1:-}"
+  local name="${2:-value}"
+
+  [[ "${value}" =~ ^[0-9]+$ ]] || {
+    nym_fail scenario "${name} must be a non-negative integer (got '${value}')"
+    return 1
+  }
+}
+
+scenario_fault_state_directory() {
+  printf '%s/scenario%s/fault-workload\n' \
+    "${NYM_SHARED_DIR:?}" "${SCENARIO_NUMBER:?}"
+}
+
+scenario_publish_fault_phase() {
+  local cycle="${1:?cycle required}"
+  local phase="${2:?phase required}"
+  local directory
+  local target
+  local temporary
+
+  directory="$(scenario_fault_state_directory)"
+  target="${directory}/phases/${NODE_NAME}"
+  temporary="${target}.tmp.$$"
+  mkdir -p "${directory}/phases"
+  printf 'cycle=%s phase=%s timestamp=%s\n' \
+    "${cycle}" "${phase}" "$(nym_timestamp)" > "${temporary}"
+  mv -f "${temporary}" "${target}"
+  nym_test_log INF scenario \
+    "fault cycle ${cycle}/${SCENARIO_FAULT_CYCLES:-3}: ${phase}"
+}
+
+scenario_mark_fault_loop_complete() {
+  local directory
+
+  directory="$(scenario_fault_state_directory)/complete"
+  mkdir -p "${directory}"
+  : > "${directory}/${NODE_NAME}"
+  nym_test_log INF scenario "fault workload completed"
+}
+
+scenario_fault_loops_complete() {
+  local directory
+
+  directory="$(scenario_fault_state_directory)/complete"
+  [[ -f "${directory}/node05" && -f "${directory}/node07" ]]
+}
+
+_scenario_fault_deadline_check() {
+  local started="${1:?start time required}"
+  local timeout="${2:?timeout required}"
+  local activity="${3:-scenario workload}"
+
+  if (( SECONDS - started >= timeout )); then
+    nym_fail scenario "${activity} exceeded the ${timeout}s fault-workload limit"
+    return 1
+  fi
+}
+
+run_validator_transaction_workload() {
+  local recipient="${1:?transaction recipient required}"
+  local timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+  local interval="${SCENARIO_TRANSACTION_INTERVAL_SECONDS:-2}"
+  local started="${SECONDS}"
+  local iteration=0
+  local before
+  local transaction_hash
+
+  _require_validator
+  _scenario_require_positive_integer "${timeout}" SCENARIO_FAULT_MAX_SECONDS
+  _scenario_require_non_negative_integer \
+    "${interval}" SCENARIO_TRANSACTION_INTERVAL_SECONDS
+  until scenario_fault_loops_complete; do
+    _scenario_fault_deadline_check \
+      "${started}" "${timeout}" "${NODE_NAME} transaction workload"
+    iteration=$((iteration + 1))
+    before="$(_last_block_value)"
+    [[ "${before}" =~ ^[0-9]+$ ]] || {
+      nym_fail scenario "could not read a block height before transaction ${iteration}"
+      return 1
+    }
+    transaction_hash="$(send_tokens \
+      "${recipient}" \
+      1unym \
+      "scenario1-${NODE_NAME}-transaction-${iteration}-$(date +%s%N)")"
+    wait_for_transaction "${transaction_hash}" 60
+    wait_for_block "$((before + 1))" 60
+    nym_test_log INF scenario \
+      "transaction workload iteration ${iteration} committed as ${transaction_hash}"
+    sleep "${interval}"
+  done
+
+  (( iteration > 0 )) || {
+    nym_fail scenario "fault workload ended before ${NODE_NAME} submitted a transaction"
+    return 1
+  }
+  nym_test_log INF scenario \
+    "transaction workload stopped after ${iteration} committed transaction(s)"
+}
+
+run_mixnet_observation_workload() {
+  local timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+  local request_timeout="${SCENARIO_MIXNET_OBSERVATION_TIMEOUT_SECONDS:-12}"
+  local interval="${SCENARIO_MIXNET_OBSERVATION_INTERVAL_SECONDS:-2}"
+  local started="${SECONDS}"
+  local iteration=0
+  local token
+
+  [[ "${NODE_NAME:-}" == node01 ]] || {
+    nym_fail scenario "only node01 may run the mixnet observation workload"
+    return 1
+  }
+  _scenario_require_positive_integer "${timeout}" SCENARIO_FAULT_MAX_SECONDS
+  _scenario_require_positive_integer \
+    "${request_timeout}" SCENARIO_MIXNET_OBSERVATION_TIMEOUT_SECONDS
+  _scenario_require_non_negative_integer \
+    "${interval}" SCENARIO_MIXNET_OBSERVATION_INTERVAL_SECONDS
+
+  until scenario_fault_loops_complete; do
+    _scenario_fault_deadline_check \
+      "${started}" "${timeout}" "mixnet observation workload"
+    iteration=$((iteration + 1))
+    token="scenario1-observation-${iteration}"
+    mixnet_http_request "${token}" observe "${request_timeout}"
+    sleep "${interval}"
+  done
+
+  (( iteration > 0 )) || {
+    nym_fail scenario "fault workload ended before node01 made a mixnet observation"
+    return 1
+  }
+  nym_test_log INF scenario \
+    "mixnet observation workload stopped after ${iteration} request(s)"
+}
+
+run_nym_health_chain_workload() {
+  local timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+  local interval="${SCENARIO_NYM_OBSERVATION_INTERVAL_SECONDS:-2}"
+  local started="${SECONDS}"
+  local iteration=0
+  local initial_height
+  local previous_height
+  local current_height
+  local health
+
+  _require_nym_node
+  _scenario_require_positive_integer "${timeout}" SCENARIO_FAULT_MAX_SECONDS
+  _scenario_require_non_negative_integer \
+    "${interval}" SCENARIO_NYM_OBSERVATION_INTERVAL_SECONDS
+  initial_height="$(last_block)"
+  [[ "${initial_height}" =~ ^[0-9]+$ ]] || {
+    nym_fail scenario "${NODE_NAME} could not read its validator height"
+    return 1
+  }
+  previous_height="${initial_height}"
+
+  until scenario_fault_loops_complete; do
+    _scenario_fault_deadline_check \
+      "${started}" "${timeout}" "${NODE_NAME} health/chain workload"
+    iteration=$((iteration + 1))
+    if [[ -z "${NODE_PID:-}" ]] || ! kill -0 "${NODE_PID}" 2>/dev/null; then
+      nym_fail scenario "${NODE_NAME} runtime exited during the healthy-node workload"
+      return 1
+    fi
+    if nym_health; then
+      health=responding
+    else
+      health=unavailable
+    fi
+    current_height="$(last_block)"
+    [[ "${current_height}" =~ ^[0-9]+$ ]] || {
+      nym_fail scenario "${NODE_NAME} could not observe the live chain"
+      return 1
+    }
+    (( current_height >= previous_height )) || {
+      nym_fail scenario \
+        "${NODE_NAME} observed chain height regression ${previous_height} -> ${current_height}"
+      return 1
+    }
+    nym_test_log INF scenario \
+      "healthy-node observation ${iteration}: nym_http=${health}, chain_height=${current_height}"
+    previous_height="${current_height}"
+    sleep "${interval}"
+  done
+
+  (( iteration > 0 && previous_height > initial_height )) || {
+    nym_fail scenario \
+      "${NODE_NAME} did not observe advancing blocks during the fault workload"
+    return 1
+  }
+  nym_test_log INF scenario \
+    "healthy-node workload stopped after ${iteration} observation(s); chain advanced ${initial_height} -> ${previous_height}"
+}
+
+run_odd_nym_fault_workload() {
+  local cycles="${SCENARIO_FAULT_CYCLES:-3}"
+  local timeout="${SCENARIO_FAULT_MAX_SECONDS:-600}"
+  local initial_grace="${SCENARIO_FAULT_INITIAL_GRACE_SECONDS:-3}"
+  local node07_offset="${SCENARIO_NODE07_FAULT_OFFSET_SECONDS:-2}"
+  local delay_seconds="${SCENARIO_FAULT_DELAY_SECONDS:-8}"
+  local interruption_seconds="${SCENARIO_FAULT_INTERRUPTION_SECONDS:-6}"
+  local downtime_seconds="${SCENARIO_FAULT_DOWNTIME_SECONDS:-6}"
+  local recovery_seconds="${SCENARIO_FAULT_RECOVERY_SECONDS:-5}"
+  local recovery_timeout="${SCENARIO_NODE_RECOVERY_TIMEOUT_SECONDS:-90}"
+  local started="${SECONDS}"
+  local cycle
+  local height
+
+  _require_nym_node
+  case "${NODE_NAME:-}" in
+    node05|node07) ;;
+    *)
+      nym_fail scenario "fault workload is restricted to odd Nym nodes node05 and node07"
+      return 1
+      ;;
+  esac
+
+  _scenario_require_positive_integer "${cycles}" SCENARIO_FAULT_CYCLES
+  _scenario_require_positive_integer "${timeout}" SCENARIO_FAULT_MAX_SECONDS
+  _scenario_require_non_negative_integer \
+    "${initial_grace}" SCENARIO_FAULT_INITIAL_GRACE_SECONDS
+  _scenario_require_non_negative_integer \
+    "${node07_offset}" SCENARIO_NODE07_FAULT_OFFSET_SECONDS
+  _scenario_require_non_negative_integer \
+    "${delay_seconds}" SCENARIO_FAULT_DELAY_SECONDS
+  _scenario_require_non_negative_integer \
+    "${interruption_seconds}" SCENARIO_FAULT_INTERRUPTION_SECONDS
+  _scenario_require_non_negative_integer \
+    "${downtime_seconds}" SCENARIO_FAULT_DOWNTIME_SECONDS
+  _scenario_require_non_negative_integer \
+    "${recovery_seconds}" SCENARIO_FAULT_RECOVERY_SECONDS
+  _scenario_require_positive_integer \
+    "${recovery_timeout}" SCENARIO_NODE_RECOVERY_TIMEOUT_SECONDS
+  _scenario_require_non_negative_integer \
+    "${MIXNET_DELAY_MS:-250}" MIXNET_DELAY_MS
+  _scenario_require_non_negative_integer \
+    "${MIXNET_DELAY_JITTER_MS:-50}" MIXNET_DELAY_JITTER_MS
+
+  scenario_publish_fault_phase 0 initial-grace
+  sleep "${initial_grace}"
+  if [[ "${NODE_NAME}" == node07 ]]; then
+    scenario_publish_fault_phase 0 node07-stagger
+    sleep "${node07_offset}"
+  fi
+
+  for ((cycle = 1; cycle <= cycles; cycle++)); do
+    _scenario_fault_deadline_check \
+      "${started}" "${timeout}" "${NODE_NAME} fault workload"
+
+    scenario_publish_fault_phase "${cycle}" delay
+    network_delay "${MIXNET_DELAY_MS:-250}" "${MIXNET_DELAY_JITTER_MS:-50}"
+    sleep "${delay_seconds}"
+    network_heal
+
+    scenario_publish_fault_phase "${cycle}" interruption
+    network_isolate
+    sleep "${interruption_seconds}"
+    network_heal
+
+    scenario_publish_fault_phase "${cycle}" process-down
+    node_stop
+    sleep "${downtime_seconds}"
+
+    scenario_publish_fault_phase "${cycle}" restarting
+    node_start
+    wait_for_tcp 127.0.0.1 "${NYM_HTTP_PORT}" "${recovery_timeout}"
+    if ! nym_health; then
+      nym_test_log INF scenario \
+        "${NODE_NAME} HTTP port recovered; this nym-node build has no compatible health endpoint"
+    fi
+    height="$(last_block)"
+    [[ "${height}" =~ ^[0-9]+$ ]] || {
+      nym_fail scenario "${NODE_NAME} could not observe the chain after restart"
+      return 1
+    }
+    scenario_publish_fault_phase "${cycle}" recovered-at-chain-height-${height}
+    sleep "${recovery_seconds}"
+  done
+
+  scenario_publish_fault_phase "${cycles}" complete
+  scenario_mark_fault_loop_complete
+}
+
 wait_for_tcp() {
   local host="${1:?host required}"
   local port="${2:?port required}"
@@ -131,58 +425,6 @@ node_stop() {
   wait "${NODE_PID}" 2>/dev/null || true
   NODE_PID=""
   export NODE_PID
-}
-
-node_restart() {
-  node_stop
-  node_start
-}
-
-node_pause() {
-  [[ -n "${NODE_PID:-}" ]] && kill -0 "${NODE_PID}" 2>/dev/null \
-    || nym_fail action "node process is not running"
-  nym_test_log INF action "pausing PID ${NODE_PID}"
-  kill -STOP "${NODE_PID}"
-}
-
-node_resume() {
-  [[ -n "${NODE_PID:-}" ]] && kill -0 "${NODE_PID}" 2>/dev/null \
-    || nym_fail action "node process is not running"
-  nym_test_log INF action "resuming PID ${NODE_PID}"
-  kill -CONT "${NODE_PID}"
-}
-
-wait_for_signed_height() {
-  local target="${1:?target height required}"
-  local timeout="${2:-300}"
-  local state_file="${NYXD_HOME}/data/priv_validator_state.json"
-  local height=0
-  local started="${SECONDS}"
-
-  _require_validator
-  while true; do
-    height="$(jq -r '.height // "0"' "${state_file}" 2>/dev/null || echo 0)"
-    [[ "${height}" =~ ^[0-9]+$ ]] || height=0
-    if (( height >= target )); then
-      return 0
-    fi
-    if [[ -n "${NODE_PID:-}" ]] && ! kill -0 "${NODE_PID}" 2>/dev/null; then
-      local exit_status=0
-      set +e
-      wait "${NODE_PID}" 2>/dev/null
-      exit_status=$?
-      set -e
-      NODE_PID=""
-      export NODE_PID
-      nym_fail action "nyxd exited before block ${target} (signed height ${height}, exit status ${exit_status})"
-      return 1
-    fi
-    if (( SECONDS - started >= timeout )); then
-      nym_fail action "timed out waiting for signed block ${target} (height ${height})"
-      return 1
-    fi
-    sleep 0.25
-  done
 }
 
 wait_for_committed_height() {
@@ -532,38 +774,6 @@ send_tokens() {
   printf '%s\n' "${transaction_hash}"
 }
 
-create_transaction() {
-  send_tokens "$@"
-}
-
-produce_block() {
-  local before
-  local own_address
-  local transaction_hash
-
-  _require_validator
-  before="$(_last_block_value)"
-  own_address="$(nyxd keys show validator -a --home "${NYXD_HOME}" --keyring-backend test)"
-  transaction_hash="$(send_tokens \
-    "${own_address}" 1unym "produce-block-${NODE_NAME}-$(date +%s%N)")"
-  wait_for_block "$((before + 1))" 60
-  wait_for_transaction "${transaction_hash}" 60
-}
-
-mine_block() {
-  produce_block
-}
-
-mine_blocks() {
-  local count="${1:-1}"
-  local index
-
-  nym_test_log INF action "producing ${count} Nyx blocks"
-  for ((index = 1; index <= count; index++)); do
-    produce_block
-  done
-}
-
 validate_chain() {
   local ready="${NYM_SHARED_DIR:?}/chain-ready.json"
   local status
@@ -592,75 +802,13 @@ validate_chain() {
   nym_test_log INF action "chain validation passed at live height ${height}"
 }
 
-validate_block() {
-  local height="${1:?height required}"
-
-  _require_validator
-  nym_test_log INF action "validating block ${height}"
-  curl -fsS "${NYXD_RPC_HTTP}/block?height=${height}" | \
-    jq -e --arg height "${height}" '.result.block.header.height == $height' >/dev/null
-  nym_test_log INF action "block ${height} is available and structurally valid"
-}
-
-validate_transaction() {
-  local hash="${1:?transaction hash required}"
-
-  _require_validator
-  nym_test_log INF action "validating transaction ${hash}"
-  nyxd query tx "${hash}" --node "${NYXD_RPC_TCP}" --output json | \
-    jq -e '.txhash != null' >/dev/null
-  nym_test_log INF action "transaction ${hash} is valid"
-}
-
-delegate_tokens() {
-  local amount="${1:-1000000unyx}"
-  local validator_operator
-
-  _require_validator
-  validator_operator="$(nyxd keys show validator --bech val -a \
-    --home "${NYXD_HOME}" --keyring-backend test)"
-  nym_test_log INF action "delegating ${amount} to ${validator_operator}"
-  nyxd tx staking delegate "${validator_operator}" "${amount}" \
-    --from validator \
-    --home "${NYXD_HOME}" \
-    --chain-id "${CHAIN_ID}" \
-    --keyring-backend test \
-    --node "${NYXD_RPC_TCP}" \
-    --gas 300000 \
-    --fees 1000unym \
-    --yes \
-    --broadcast-mode sync >/dev/null
-}
-
-unjail_validator() {
-  _require_validator
-  nym_test_log INF action "submitting validator unjail transaction"
-  nyxd tx slashing unjail \
-    --from validator \
-    --home "${NYXD_HOME}" \
-    --chain-id "${CHAIN_ID}" \
-    --keyring-backend test \
-    --node "${NYXD_RPC_TCP}" \
-    --gas 250000 \
-    --fees 1000unym \
-    --yes \
-    --broadcast-mode sync >/dev/null
-}
-
 nym_health() {
   _require_nym_node
   nym_test_log INF action "checking nym-node health API on port ${NYM_HTTP_PORT}"
-  _nym_http_first /api/v1/health /api/v1/status/health /health >/dev/null
+  if ! _nym_http_first /api/v1/health /api/v1/status/health /health >/dev/null; then
+    return 1
+  fi
   nym_test_log INF action "nym-node health endpoint responded"
-}
-
-nym_port_check() {
-  local host="${1:?host required}"
-  local port="${2:?port required}"
-
-  _require_nym_node
-  nym_test_log INF action "checking Nym service port ${host}:${port}"
-  wait_for_tcp "${host}" "${port}" 30
 }
 
 nym_write_node_details() {
@@ -707,33 +855,6 @@ nym_prepare_topology() {
     fi
     sleep 0.5
   done
-}
-
-nym_collect_bonding_inventory() {
-  local output="${NYM_SHARED_DIR}/bonding/inventory.json"
-  local started="${SECONDS}"
-  local selected_count
-  local present
-
-  _require_nym_node
-  mkdir -p "${NYM_SHARED_DIR}/bonding"
-  selected_count="$(grep -Ec '^node0[4-8]$' "${NYM_SHARED_DIR}/selected-nodes" || true)"
-  nym_test_log INF action "collecting bonding information for ${selected_count} selected nym-node services"
-
-  while true; do
-    present="$(find "${NYM_SHARED_DIR}/bonding" -maxdepth 1 \
-      -name 'node0[4-8].json' -type f | wc -l | tr -d ' ')"
-    (( present >= selected_count )) && break
-    if (( SECONDS - started >= 60 )); then
-      nym_fail action "bonding information timed out"
-      return 1
-    fi
-    sleep 0.5
-  done
-
-  jq -s '{generated_by:"nym-docker-testnet",nodes:.}' \
-    "${NYM_SHARED_DIR}"/bonding/node0[4-8].json > "${output}"
-  nym_test_log INF action "bonding inventory written to ${output}"
 }
 
 assert_internal_only() {
@@ -897,10 +1018,6 @@ start_mixnet_socks5_client() {
     init_arguments+=(--nyxd-url "${NYXD_RPC_HTTP}")
   fi
 
-  if _socks5_client_has_option "${init_help}" ; then
-    init_arguments+=()
-  fi
-
   nym_test_log INF traffic "initializing SOCKS5 client through node07 for node08 network requester"
   if ! HOME="${client_home}" "${init_arguments[@]}" \
       > >(nym_application_stream socks5-init "${init_log}") 2>&1; then
@@ -938,7 +1055,6 @@ start_mixnet_socks5_client() {
     sleep 0.5
   done
 
-  : > "${NYM_SHARED_DIR}/traffic/client-ready"
   nym_test_log INF traffic "SOCKS5 client listening on 127.0.0.1:${port}"
 }
 
@@ -977,6 +1093,8 @@ mixnet_http_request() {
   local http_status="000"
   local latency="0"
   local receiver_source=""
+  local observation_success=false
+  local observation_error=""
 
   mkdir -p "${result_dir}"
   rm -f "${body_file}" "${error_file}" "${result_file}" "${temporary}"
@@ -999,6 +1117,40 @@ mixnet_http_request() {
 
   if [[ -n "${metrics}" ]]; then
     read -r http_status latency <<<"${metrics}"
+  fi
+
+  if [[ "${expectation}" == observe ]]; then
+    if (( status == 0 )) && jq -e \
+      --arg token "${token}" \
+      --arg source "${expected_source}" \
+      '.received == true and .token == $token and .source == $source' \
+      "${body_file}" >/dev/null 2>&1; then
+      observation_success=true
+      receiver_source="$(jq -r '.source' "${body_file}")"
+      nym_test_log INF traffic \
+        "observed mixnet request '${token}' succeed via ${receiver_source} in ${latency}s"
+    else
+      if (( status == 0 )); then
+        observation_error="receiver response did not prove exit through ${expected_source}"
+      else
+        observation_error="$(cat "${error_file}" 2>/dev/null || true)"
+      fi
+      nym_test_log INF traffic \
+        "observed mixnet request '${token}' fail during the injected fault: ${observation_error:-no error details}"
+    fi
+
+    jq -n \
+      --arg token "${token}" \
+      --argjson success "${observation_success}" \
+      --argjson curl_status "${status}" \
+      --arg http_status "${http_status}" \
+      --arg latency_seconds "${latency}" \
+      --arg receiver_source "${receiver_source}" \
+      --arg error "${observation_error}" \
+      '{token:$token,expected:"observe",success:$success,curl_status:$curl_status,http_status:$http_status,latency_seconds:$latency_seconds,receiver_source:$receiver_source,error:$error}' \
+      > "${temporary}"
+    mv "${temporary}" "${result_file}"
+    return 0
   fi
 
   if [[ "${expectation}" == success ]]; then
@@ -1064,13 +1216,6 @@ mixnet_http_request() {
   nym_test_log INF traffic "request '${token}' was interrupted while the mixnet path was partitioned"
 }
 
-wait_for_mixnet_traffic_result() {
-  local token="${1:?traffic token required}"
-  local timeout="${2:-180}"
-
-  wait_for_shared_file "${NYM_SHARED_DIR:?}/traffic/results/${token}.json" "${timeout}"
-}
-
 wait_for_mixnet_traffic_receipt() {
   local token="${1:?traffic token required}"
   local timeout="${2:-180}"
@@ -1093,35 +1238,8 @@ assert_mixnet_traffic_exit_source() {
   nym_test_log INF traffic "receiver accepted '${token}' from exit gateway ${source}"
 }
 
-assert_no_mixnet_traffic_receipt() {
-  local token="${1:?traffic token required}"
-  local receipt="${NYM_SHARED_DIR:?}/traffic/receipts/${token}.json"
-
-  [[ ! -e "${receipt}" ]] || {
-    nym_fail traffic "receiver unexpectedly obtained '${token}' while the path was partitioned"
-    return 1
-  }
-  nym_test_log INF traffic "receiver did not obtain '${token}' during the partition"
-}
-
 mixnet_contract_state_file() {
   printf '%s/contracts/mixnet.json\n' "${NYM_SHARED_DIR:?}"
-}
-
-mixnet_contract_address() {
-  local state_file
-
-  state_file="$(mixnet_contract_state_file)"
-  [[ -s "${state_file}" ]] || return 1
-  jq -r '.address // .mixnet_address // empty' "${state_file}"
-}
-
-node_families_contract_address() {
-  local state_file
-
-  state_file="$(mixnet_contract_state_file)"
-  [[ -s "${state_file}" ]] || return 1
-  jq -r '.node_families_address // empty' "${state_file}"
 }
 
 wait_for_local_mixnet_contract() {

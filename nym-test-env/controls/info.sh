@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
-CONTROL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+nym_strip_ansi() {
+  LC_ALL=C sed -u -E \
+    -e $'s/\033\[[0-?]*[ -\/]*[@-~]//g' \
+    -e $'s/\033\][^\a\033]*(\a|\033\\\\)//g' \
+    -e $'s/\033[@-_]//g'
+}
 
 nym_timestamp() {
   date '+%Y-%m-%dT%H:%M:%S.%3N'
@@ -19,7 +24,7 @@ nym_test_log() {
   local rendered_severity
 
   shift 2 || true
-  message="$*"
+  message="$(printf '%s' "$*" | nym_strip_ansi)"
   case "${severity}" in
     ERR) rendered_severity=ERROR ;;
     INF) rendered_severity=INFO ;;
@@ -179,7 +184,7 @@ nym_application_stream() {
       fi
       printf '%s\n' "${line}" >&2
     fi
-  done
+  done < <(nym_strip_ansi)
 }
 
 wait_for_scenario_release() {
@@ -203,81 +208,11 @@ _last_block_value() {
     jq -r '.result.sync_info.latest_block_height'
 }
 
-blockchain_endpoint() {
-  printf '%s\n' "${NYXD_RPC_HTTP}"
-}
-
 last_block() {
   local height
 
   height="$(_last_block_value)"
   printf '%s\n' "${height}"
-}
-
-last_block_hash() {
-  local hash
-
-  hash="$(curl -fsS "${NYXD_RPC_HTTP}/status" | \
-    jq -r '.result.sync_info.latest_block_hash')"
-  printf '%s\n' "${hash}"
-}
-
-block_at_height() {
-  local height="${1:?height required}"
-
-  curl -fsS "${NYXD_RPC_HTTP}/block?height=${height}" | jq '.result.block'
-}
-
-chain_status() {
-  curl -fsS "${NYXD_RPC_HTTP}/status" | jq '{
-    node:.result.node_info.moniker,
-    network:.result.node_info.network,
-    sync:.result.sync_info,
-    validator:.result.validator_info
-  }'
-}
-
-peer_info() {
-  curl -fsS "${NYXD_RPC_HTTP}/net_info" | jq '{
-    listening:.result.listening,
-    n_peers:.result.n_peers,
-    peers:[.result.peers[]? | {
-      node_id:.node_info.id,
-      moniker:.node_info.moniker,
-      remote_ip:.remote_ip
-    }]
-  }'
-}
-
-validator_set() {
-  local height="${1:-}"
-
-  if [[ -n "${height}" ]]; then
-    curl -fsS "${NYXD_RPC_HTTP}/validators?height=${height}" | jq '.result.validators'
-  else
-    curl -fsS "${NYXD_RPC_HTTP}/validators" | jq '.result.validators'
-  fi
-}
-
-account_balance() {
-  local address="${1:-}"
-
-  if [[ -z "${address}" ]]; then
-    if [[ "${NODE_ROLE:-}" != validator ]]; then
-      nym_fail info "an address is required on non-validator nodes"
-      return 1
-    fi
-    address="$(nyxd keys show validator -a \
-      --home "${NYXD_HOME}" --keyring-backend test)"
-  fi
-  nyxd query bank balances "${address}" \
-    --node "${NYXD_RPC_TCP}" --output json | jq '.balances'
-}
-
-tx_info() {
-  local hash="${1:?transaction hash required}"
-
-  nyxd query tx "${hash}" --node "${NYXD_RPC_TCP}" --output json | jq '.'
 }
 
 _nym_http_first() {
@@ -293,70 +228,4 @@ _nym_http_first() {
     fi
   done
   return 1
-}
-
-nym_node_status() {
-  if ! _nym_http_first /api/v1/description /api/v1/roles /api/v1/status /api/v1/health; then
-    ss -lntup
-  fi
-}
-
-nym_node_metrics() {
-  _nym_http_first /api/v1/metrics /metrics || {
-    return 1
-  }
-}
-
-nym_bonding_info() {
-  local file="${NYM_SHARED_DIR}/bonding/${NODE_NAME}.json"
-
-  jq '.' "${file}"
-}
-
-nym_node_details() {
-  local file="${NYM_SHARED_DIR}/details/${NODE_NAME}.json"
-
-  jq '.' "${file}"
-}
-
-nym_topology() {
-  local file="${NYM_SHARED_DIR}/network.json"
-
-  jq '.' "${file}"
-}
-
-listening_ports() {
-  ss -lntup
-}
-
-process_info() {
-  ps -o pid,ppid,stat,%cpu,%mem,rss,vsz,cmd -p "${NODE_PID:-1}"
-}
-
-container_resources() {
-  printf 'memory.max=%s\n' "$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo unavailable)"
-  printf 'memory.current=%s\n' "$(cat /sys/fs/cgroup/memory.current 2>/dev/null || echo unavailable)"
-  printf 'cpu.max=%s\n' "$(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo unavailable)"
-  df -h / /var/lib/nym 2>/dev/null | awk '!seen[$0]++'
-}
-
-binary_source_info() {
-  local metadata
-
-  if [[ "${NODE_ROLE:-}" == validator ]]; then
-    metadata=/usr/local/share/nyxd-source.env
-  else
-    metadata=/usr/local/share/nym-node-source.env
-  fi
-  if [[ ! -f "${metadata}" ]]; then
-    nym_fail info "source build metadata is missing: ${metadata}"
-    return 1
-  fi
-  cat "${metadata}"
-}
-
-chain_state_source() {
-  local ready="${NYM_SHARED_DIR:?}/chain-ready.json"
-
-  jq '.' "${ready}"
 }

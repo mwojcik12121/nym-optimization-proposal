@@ -24,6 +24,29 @@ runner_die() {
   exit "${status}"
 }
 
+clear_previous_logs() {
+  mkdir -p "${logs_dir}"
+  find "${logs_dir}" -maxdepth 1 -type f -name '*.log' -delete
+}
+
+ensure_runtime_base_image() {
+  local archive="bin/runtime-base-image.tar"
+  local image="nym-test/runtime-base:v2"
+
+  if docker image inspect "${image}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  [[ -s "${archive}" ]] \
+    || nym_abort images "${image} is not loaded and ${archive} is missing"
+
+  nym_test_log INF images "loading ${image} from ${archive}"
+  docker load --input "${archive}" >/dev/null \
+    || nym_abort images "could not load runtime base image from ${archive}"
+  docker image inspect "${image}" >/dev/null 2>&1 \
+    || nym_abort images "${archive} did not provide the expected image ${image}"
+}
+
 build_images() {
   local file
   local number
@@ -34,8 +57,7 @@ build_images() {
     || nym_abort images 'Docker daemon is not reachable'
   docker compose version >/dev/null 2>&1 \
     || nym_abort images 'Docker Compose v2 is required'
-  docker image inspect nym-test/runtime-base:v2 >/dev/null 2>&1 \
-    || nym_abort images 'nym-test/runtime-base:v2 is missing'
+  ensure_runtime_base_image
 
   for file in \
     bin/bin/nyxd \
@@ -140,6 +162,7 @@ save_node_logs() {
   local index
   local file
   local remote
+  local sanitized
   local temporary
 
   mkdir -p "${logs_dir}"
@@ -149,15 +172,19 @@ save_node_logs() {
     file="${logs_dir}/${services[$index]}_scenario${scenario}_${run_datetime}.log"
     remote="/var/lib/nym/logs/${services[$index]}.log"
     temporary="${file}.tmp.$$"
+    sanitized="${temporary}.clean"
 
     [[ -n "${cid}" ]] || continue
-    rm -f "${temporary}"
+    rm -f "${temporary}" "${sanitized}"
     if docker cp "${cid}:${remote}" "${temporary}" >/dev/null 2>&1; then
-      mv -f "${temporary}" "${file}"
+      nym_strip_ansi < "${temporary}" > "${sanitized}"
     else
-      rm -f "${temporary}"
-      docker logs "${cid}" > "${file}" 2>&1 || true
+      docker logs "${cid}" 2>&1 | nym_strip_ansi > "${sanitized}" || true
     fi
+    if [[ -f "${sanitized}" ]]; then
+      mv -f "${sanitized}" "${file}"
+    fi
+    rm -f "${temporary}" "${sanitized}"
   done
 }
 
@@ -434,6 +461,7 @@ compose=(
   -f docker/compose.yaml
 )
 
+clear_previous_logs
 build_images
 
 if ! start_output="$(
